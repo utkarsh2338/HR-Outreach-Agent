@@ -1,6 +1,5 @@
 import Groq from 'groq-sdk';
-
-const MODEL = 'llama-3.3-70b-versatile';
+import { LLM_MODEL } from '../config/llm.js';
 
 /**
  * Uses Groq LLM to analyze, deduplicate, and synthesize raw resume text,
@@ -41,6 +40,8 @@ export const synthesizeUserProfile = async ({ resumeText = '', githubData = null
   const systemPrompt = `You are an expert HR background analyst and resume parser.
 Analyze the candidate's raw resume text, GitHub repositories, and LinkedIn data provided.
 Synthesize all inputs into a single, comprehensive, deduplicated JSON profile.
+
+If the source material is sparse for a field (e.g. no listed achievements), leave that field as an empty array/string rather than inventing plausible-sounding content to fill it.
 
 Return ONLY valid JSON matching this exact structure with NO markdown wrappers around it (no backticks):
 {
@@ -95,13 +96,14 @@ Remember: Output raw JSON only. Do not include markdown code block syntax.`;
     const groq = new Groq({ apiKey });
 
     const completion = await groq.chat.completions.create({
-      model: MODEL,
+      model: LLM_MODEL,
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt }
       ],
       temperature: 0.2,
       max_tokens: 1500,
+      response_format: { type: 'json_object' },
       stream: false
     });
 

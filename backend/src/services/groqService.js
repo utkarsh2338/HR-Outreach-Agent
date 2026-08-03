@@ -1,13 +1,8 @@
 import Groq from 'groq-sdk';
 import { buildColdEmail } from '../templates/coldEmail.js';
-
-const MODEL = 'llama-3.3-70b-versatile';
+import { LLM_MODEL } from '../config/llm.js';
 
 // Generic fallback opener used when Groq fails or returns a weak result
-const FALLBACK_OPENER =
-  `I came across ${'{company}'}` +
-  ` and noticed your team is actively building — I'd love to explore if my background could be a fit.`;
-
 const getFallbackOpener = (company) =>
   `I came across ${company} and noticed your team is actively building — I'd love to explore if my background could be a fit.`;
 
@@ -30,7 +25,6 @@ const CLICHE_PATTERNS = [
  */
 const isWeakResponse = (text) => {
   if (!text || text.trim().length < 15) return true;
-  // Reject anything with more than ~60 words (limit is 40 — give some leeway)
   const wordCount = text.trim().split(/\s+/).length;
   if (wordCount > 60) return true;
   return CLICHE_PATTERNS.some((pattern) => pattern.test(text));
@@ -55,18 +49,21 @@ export const generatePersonalizedOpener = async ({ name, company, role_title, no
     return { opener: getFallbackOpener(company), llm_generated: false };
   }
 
-  const roleContext = role_title ? ` (${role_title})` : '';
   const notesContext = notes ? `\nAdditional context: ${notes}` : '';
 
   const systemPrompt = `You write cold email openers for a software developer reaching out to HR professionals and recruiters.
 
 Rules you MUST follow:
-- Write exactly 1-2 sentences, plain text only
-- Stay under 40 words total
-- Reference something specific and plausible about the company or role — NOT generic praise
+- Write exactly 1-2 sentences, plain text only, under 40 words total
+- ONLY reference a specific company/role detail if it is explicitly present in the "Additional context" below — never invent facts, products, initiatives, funding, or team details you weren't given
+- If no specific context is provided, write a warm, role-focused opener without fake specificity — genuine and plain beats invented detail
 - Do NOT use: "I hope this email finds you well", "I was thrilled", "I was excited", "I came across your profile", "I stumbled upon"
-- Do NOT include any preamble, label, or explanation — output ONLY the opener text itself
-- Sound like a real person, not a marketing email`;
+- Output ONLY the opener text — no preamble, label, or explanation
+- Sound like a real person, not a marketing email
+
+Example (good, grounded in given context): "Noticed Acme's engineering blog post on their move to event-driven architecture — that's the kind of systems problem I'd want to be working on."
+Example (good, no context given): "I'd love to learn more about the engineering team at Acme and whether there's a fit for a full-stack developer."
+Example (bad — never do this): "I was excited to learn about Acme's innovative culture and cutting-edge technology."`;
 
   const userPrompt = `Write the personalized opening line for a cold email to a recruiter.
 
@@ -80,7 +77,7 @@ Return only the opener text, nothing else.`;
     const groq = new Groq({ apiKey });
 
     const completion = await groq.chat.completions.create({
-      model: MODEL,
+      model: LLM_MODEL,
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt }
@@ -140,7 +137,8 @@ RULES:
 1. Sound genuine, natural, concise, and professional — like a real engineer writing directly to a recruiter.
 2. DO NOT use generic phrases like "I hope this email finds you well", "I stumbled upon", "I am thrilled", "I am writing to express my enthusiasm", or corporate jargon.
 3. Tailor the email directly using the candidate's actual projects, achievements, and skills from their background.
-4. Output JSON ONLY matching this exact format with NO markdown wrapping:
+4. Do NOT invent facts about the recipient's company (funding, initiatives, team size, products). If you don't have real company context, keep the hook focused on genuine candidate-role fit instead of fabricated company specifics.
+5. Output JSON ONLY matching this exact format with NO markdown wrapping:
 {
   "subject": "Compelling subject line mentioning role/company and key strength or name",
   "textBody": "Full plain text email body including greeting, tailored hook, background highlights (bullet points or short paragraphs), call to action, and signature",
@@ -170,13 +168,14 @@ Write a complete recruiter-ready cold email. Output raw JSON only.`;
     const groq = new Groq({ apiKey });
 
     const completion = await groq.chat.completions.create({
-      model: MODEL,
+      model: LLM_MODEL,
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt }
       ],
       temperature: 0.5,
       max_tokens: 1000,
+      response_format: { type: 'json_object' },
       stream: false
     });
 

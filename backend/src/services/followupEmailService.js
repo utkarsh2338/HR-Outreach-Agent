@@ -1,6 +1,6 @@
 import Groq from 'groq-sdk';
-
-const MODEL = 'llama-3.3-70b-versatile';
+import EmailLog from '../models/EmailLog.js';
+import { LLM_MODEL } from '../config/llm.js';
 
 const CLICHE_PATTERNS = [
   /i hope this (email |message )?(finds|reaches) you/i,
@@ -24,12 +24,11 @@ const getFallbackNudge = (company) =>
 
 /**
  * Generates a short, human-sounding follow-up nudge sentence using Groq.
- * Falls back to a static nudge if Groq is unavailable or returns a weak result.
  *
- * @param {{ name: string, company: string, role_title: string, followup_count: number }} params
+ * @param {{ name: string, company: string, role_title: string, followup_count: number, originalOpener?: string }} params
  * @returns {Promise<{ nudge: string, llm_generated: boolean }>}
  */
-const generateFollowupNudge = async ({ name, company, role_title, followup_count }) => {
+export const generateFollowupNudge = async ({ name, company, role_title, followup_count, originalOpener }) => {
   const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) {
     return { nudge: getFallbackNudge(company), llm_generated: false };
@@ -37,6 +36,7 @@ const generateFollowupNudge = async ({ name, company, role_title, followup_count
 
   const attemptLabel = followup_count === 1 ? 'first' : 'second';
   const roleCtx = role_title ? ` (${role_title})` : '';
+  const originalCtx = originalOpener ? `\nOriginal initial email context: "${originalOpener}"` : '';
 
   const systemPrompt = `You write concise follow-up nudges for cold emails in a job search context.
 
@@ -51,17 +51,14 @@ Rules you MUST follow:
   const userPrompt = `Write a follow-up nudge for my ${attemptLabel} follow-up email.
 
 Recipient: ${name || 'the recruiter'}${roleCtx}
-Company: ${company}
-
-I sent them a cold email introducing myself as a software developer. They haven't replied yet.
-I want to gently check if they had a chance to see it.
+Company: ${company}${originalCtx}
 
 Return only the nudge sentence.`;
 
   try {
     const groq = new Groq({ apiKey });
     const completion = await groq.chat.completions.create({
-      model: MODEL,
+      model: LLM_MODEL,
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt }
@@ -90,18 +87,31 @@ Return only the nudge sentence.`;
  * @param {object} contact - Contact mongoose document
  * @returns {Promise<{ subject: string, htmlBody: string, textBody: string, llm_generated: boolean }>}
  */
-export const generateFollowupDraft = async (contact) => {
-  const { name, company, role_title, followup_count } = contact;
+export const generateFollowupEmail = async (contact) => {
+  const { name, company, role_title, followup_count, _id, user_id } = contact;
   const greeting = name ? name.split(' ')[0] : 'there';
+
+  // Find original outbound email log to preserve context
+  let originalOpener = '';
+  let originalSubject = `Exploring opportunities at ${company}`;
+
+  if (_id) {
+    const priorLog = await EmailLog.findOne({ contact_id: _id, direction: 'outbound' }).sort({ createdAt: 1 });
+    if (priorLog) {
+      originalSubject = priorLog.subject ? `Re: ${priorLog.subject.replace(/^Re:\s*/i, '')}` : originalSubject;
+      originalOpener = priorLog.body ? priorLog.body.slice(0, 150) : '';
+    }
+  }
 
   const { nudge, llm_generated } = await generateFollowupNudge({
     name,
     company,
     role_title,
-    followup_count
+    followup_count,
+    originalOpener
   });
 
-  const subject = `Re: Quick intro — software developer (following up)`;
+  const subject = originalSubject;
 
   const textBody = `Hi ${greeting},
 
@@ -112,11 +122,7 @@ I'll keep this brief — I'm a software developer with full-stack experience (No
 Happy to send more details or jump on a quick call whenever suits you.
 
 Best regards,
-Utkarsh
-LinkedIn: https://linkedin.com/in/utkarsh
-
----
-To opt out of future messages, simply reply with "unsubscribe" and I will immediately remove you from my list.`;
+Utkarsh Shukla`;
 
   const htmlBody = `<!DOCTYPE html>
 <html>
@@ -124,7 +130,7 @@ To opt out of future messages, simply reply with "unsubscribe" and I will immedi
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
 </head>
-<body style="font-family: Georgia, 'Times New Roman', serif; font-size: 15px; line-height: 1.7; color: #2c2c2c; max-width: 560px; margin: 0 auto; padding: 24px;">
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 15px; line-height: 1.7; color: #2c2c2c; max-width: 560px; margin: 0 auto; padding: 24px;">
 
   <p>Hi ${greeting},</p>
 
@@ -136,14 +142,7 @@ To opt out of future messages, simply reply with "unsubscribe" and I will immedi
 
   <p style="margin-top: 28px;">
     Best regards,<br>
-    <strong>Utkarsh</strong><br>
-    <a href="https://linkedin.com/in/utkarsh" style="color: #0077b5;">LinkedIn Profile</a>
-  </p>
-
-  <hr style="border: none; border-top: 1px solid #e0e0e0; margin: 28px 0;">
-  <p style="font-size: 11px; color: #999999; line-height: 1.5;">
-    To opt out of future messages, simply reply with <strong>"unsubscribe"</strong>
-    and I will immediately remove you from my list.
+    <strong>Utkarsh Shukla</strong>
   </p>
 
 </body>
@@ -151,3 +150,6 @@ To opt out of future messages, simply reply with "unsubscribe" and I will immedi
 
   return { subject, textBody, htmlBody, llm_generated };
 };
+
+// Backward-compatible alias
+export const generateFollowupDraft = generateFollowupEmail;

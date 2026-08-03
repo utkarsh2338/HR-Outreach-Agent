@@ -214,12 +214,11 @@ RULES:
 1. Sound genuine, natural, concise, and professional — like a real engineer writing directly to a recruiter.
 2. DO NOT use generic phrases like "I hope this email finds you well", "I stumbled upon", "I am thrilled", "I am writing to express my enthusiasm", or corporate jargon.
 3. Tailor the email directly using the candidate's actual projects, achievements, and skills from their background.
-4. Do NOT invent facts about the recipient's company (funding, initiatives, team size, products). If you don't have real company context, keep the hook focused on genuine candidate-role fit instead of fabricated company specifics.
+4. Do NOT invent facts about the recipient's company (funding, initiatives, team size, products). Keep the email concise and focused on genuine candidate-role fit.
 5. Output JSON ONLY matching this exact format with NO markdown wrapping:
 {
-  "subject": "Compelling subject line mentioning role/company and key strength or name",
-  "textBody": "Full plain text email body including greeting, tailored hook, background highlights (bullet points or short paragraphs), call to action, and signature",
-  "htmlBody": "HTML formatted version of the exact same email body with clean inline CSS styling"
+  "subject": "Compelling subject line mentioning role/company and key strength or candidate name",
+  "textBody": "Full plain text email body including greeting, tailored hook, background highlights (bullet points or short paragraphs), call to action, and signature"
 }`;
 
   const userPrompt = `CANDIDATE BACKGROUND:
@@ -251,7 +250,7 @@ Write a complete recruiter-ready cold email. Output raw JSON only.`;
         { role: 'user', content: userPrompt }
       ],
       temperature: 0.5,
-      max_tokens: 1000,
+      max_tokens: 2500,
       response_format: { type: 'json_object' },
       stream: false
     });
@@ -259,7 +258,7 @@ Write a complete recruiter-ready cold email. Output raw JSON only.`;
     const raw = completion.choices?.[0]?.message?.content?.trim() ?? '';
     const result = safeParseJSON(raw);
 
-    if (result?.subject && (result?.textBody || result?.htmlBody)) {
+    if (result?.subject && result?.textBody) {
       return {
         subject: result.subject,
         textBody: result.textBody,

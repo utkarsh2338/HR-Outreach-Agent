@@ -1,0 +1,42 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+  }
+
+  body {
+    @apply bg-white text-gray-900 text-sm;
+  }
+
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+}
+
+@layer components {
+  /* Sticky table header */
+  .thead-sticky th {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    @apply bg-white;
+  }
+
+  /* Scrollable table wrapper */
+  .table-container {
+    @apply overflow-x-auto overflow-y-auto;
+    max-height: calc(100vh - 180px);
+  }
+
+  /* Focus ring consistent with design system */
+  .focus-ring {
+    @apply focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-1;
+  }
+}

@@ -50,6 +50,18 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
+  const devLogin = async (email) => {
+    try {
+      const data = await api.post('/api/auth/dev-login', { email });
+      if (data?.user) {
+        setUser(data.user);
+        window.location.href = '/';
+      }
+    } catch (err) {
+      alert(`Dev login failed: ${err.message}`);
+    }
+  };
+
   const updateUserSettings = (updatedUser) => {
     setUser((prev) => ({ ...prev, ...updatedUser }));
   };
@@ -61,6 +73,7 @@ export const AuthProvider = ({ children }) => {
         loading,
         error,
         loginWithGoogle,
+        devLogin,
         logout,
         fetchUser,
         updateUserSettings

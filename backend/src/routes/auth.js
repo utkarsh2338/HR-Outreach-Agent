@@ -141,6 +141,56 @@ router.get('/me', requireAuth, (req, res) => {
 });
 
 /**
+ * @route   POST /api/auth/dev-login
+ * @desc    Quick dev login for local testing without Google OAuth console setup
+ */
+router.post('/dev-login', async (req, res) => {
+  try {
+    const email = req.body?.email || process.env.LEGACY_USER_EMAIL || 'utkarshshukla1007@gmail.com';
+    let user = await User.findOne({ email: email.toLowerCase() });
+
+    if (!user) {
+      user = await User.create({
+        name: 'Utkarsh Shukla',
+        email: email.toLowerCase(),
+        google_id: 'dev_user_google_id_001',
+        google_refresh_token: process.env.GMAIL_REFRESH_TOKEN || undefined,
+        autonomy_mode: 'approval_required',
+        daily_send_limit: parseInt(process.env.DAILY_SEND_LIMIT || '20', 10),
+        timezone: 'Asia/Kolkata',
+        is_active: true
+      });
+    }
+
+    const token = generateToken(user);
+
+    res.cookie('token', token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 7 * 24 * 60 * 60 * 1000
+    });
+
+    return res.status(200).json({
+      message: 'Dev login successful',
+      token,
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        autonomy_mode: user.autonomy_mode,
+        daily_send_limit: user.daily_send_limit,
+        timezone: user.timezone,
+        blocklist: user.blocklist || [],
+        created_at: user.createdAt
+      }
+    });
+  } catch (err) {
+    return res.status(500).json({ error: 'Dev login failed', details: err.message });
+  }
+});
+
+/**
  * @route   POST /api/auth/logout
  * @desc    Clear session cookie
  */

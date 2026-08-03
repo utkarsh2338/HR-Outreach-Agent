@@ -3,7 +3,7 @@ import { useAuth } from '../context/AuthContext';
 import { Navigate } from 'react-router-dom';
 
 const Login = () => {
-  const { user, loading, loginWithGoogle, devLogin } = useAuth();
+  const { user, loading, loginWithGoogle } = useAuth();
 
   if (loading) {
     return (
@@ -30,7 +30,7 @@ const Login = () => {
           <p className="mt-2 text-sm text-slate-400">Multi-tenant AI Cold Email & Recruiter Outreach Platform</p>
         </div>
 
-        <div className="space-y-3 pt-4">
+        <div className="space-y-4 pt-4">
           <button
             onClick={loginWithGoogle}
             className="w-full flex items-center justify-center gap-3 px-4 py-3.5 border border-slate-600 rounded-xl shadow-lg bg-slate-700/50 hover:bg-slate-700 text-white font-medium transition-all duration-200 hover:border-indigo-500 hover:shadow-indigo-500/10"
@@ -54,19 +54,6 @@ const Login = () => {
               />
             </svg>
             Sign in with Google
-          </button>
-
-          <div className="relative flex py-2 items-center">
-            <div className="flex-grow border-t border-slate-700"></div>
-            <span className="flex-shrink mx-4 text-xs text-slate-500 uppercase tracking-wider">or local test</span>
-            <div className="flex-grow border-t border-slate-700"></div>
-          </div>
-
-          <button
-            onClick={() => devLogin('utkarshshukla1007@gmail.com')}
-            className="w-full flex items-center justify-center gap-2 px-4 py-3 border border-indigo-500/40 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-200 font-medium text-sm transition-all"
-          >
-            ⚡ Quick Dev Login (Utkarsh Shukla)
           </button>
         </div>
 

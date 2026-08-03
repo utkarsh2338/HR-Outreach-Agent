@@ -1,5 +1,8 @@
-import pdfParse from 'pdf-parse';
+import { createRequire } from 'module';
 import mammoth from 'mammoth';
+
+const require = createRequire(import.meta.url);
+const pdfParse = require('pdf-parse');
 
 /**
  * Extracts plain text from a resume buffer (PDF or DOCX).

@@ -5,6 +5,7 @@ import { parseResumeBuffer } from '../services/resumeParserService.js';
 import { fetchGithubProfile, fetchLinkedinProfile } from '../services/profileFetcherService.js';
 import { synthesizeUserProfile } from '../services/profileAnalysisService.js';
 import { generateFullPersonalizedEmail } from '../services/groqService.js';
+import { buildColdEmail } from '../templates/coldEmail.js';
 
 const router = express.Router();
 
@@ -189,15 +190,19 @@ router.post('/test-generate', async (req, res) => {
 
     const profile = await UserProfile.getProfile();
 
-    const result = await generateFullPersonalizedEmail({
+    let result = await generateFullPersonalizedEmail({
       userProfile: profile,
       contact: { company, role_title, name, notes }
     });
 
     if (!result) {
-      return res.status(500).json({
-        error: 'Failed to generate test email. Ensure GROQ_API_KEY is configured and profile is analyzed.'
-      });
+      const fallback = buildColdEmail({ name, company, role_title });
+      result = {
+        subject: fallback.subject,
+        textBody: fallback.textBody,
+        htmlBody: fallback.htmlBody,
+        llm_generated: false
+      };
     }
 
     return res.status(200).json({

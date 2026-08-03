@@ -1,4 +1,5 @@
 import Groq from 'groq-sdk';
+import { buildColdEmail } from '../templates/coldEmail.js';
 
 const MODEL = 'llama-3.3-70b-versatile';
 
@@ -29,6 +30,7 @@ const CLICHE_PATTERNS = [
  */
 const isWeakResponse = (text) => {
   if (!text || text.trim().length < 15) return true;
+  // Reject anything with more than ~60 words (limit is 40 — give some leeway)
   const wordCount = text.trim().split(/\s+/).length;
   if (wordCount > 60) return true;
   return CLICHE_PATTERNS.some((pattern) => pattern.test(text));
@@ -36,6 +38,14 @@ const isWeakResponse = (text) => {
 
 /**
  * Generates a personalized 1-2 sentence cold email opener using Groq's Llama 3.3 70B model.
+ * Falls back gracefully to a neutral static opener on any error or weak response.
+ *
+ * @param {object} params
+ * @param {string} params.name        - Recipient's name
+ * @param {string} params.company     - Recipient's company name
+ * @param {string} params.role_title  - Recipient's job title (optional)
+ * @param {string} params.notes       - Internal notes that may contain useful context (optional)
+ * @returns {Promise<{ opener: string, llm_generated: boolean }>}
  */
 export const generatePersonalizedOpener = async ({ name, company, role_title, notes }) => {
   const apiKey = process.env.GROQ_API_KEY;
@@ -95,8 +105,8 @@ Return only the opener text, nothing else.`;
 };
 
 /**
- * Generates a complete, personalized cold email draft tailored to the applicant's synthesized profile
- * (Resume + GitHub + LinkedIn) and the target company/recruiter context.
+ * Generates a full personalized cold email based on the candidate's active UserProfile.
+ * Uses Groq (Llama 3.3 70B) to synthesize resume + GitHub + LinkedIn data into a targeted outreach email.
  *
  * @param {object} params
  * @param {object} params.userProfile - Candidate profile object from database
@@ -104,19 +114,25 @@ Return only the opener text, nothing else.`;
  * @returns {Promise<{ subject: string, textBody: string, htmlBody: string, llm_generated: boolean }>}
  */
 export const generateFullPersonalizedEmail = async ({ userProfile, contact }) => {
+  const { name: recruiterName, company, role_title, notes } = contact || {};
+  const companyName = company ? company.trim() : 'your team';
+
   const apiKey = process.env.GROQ_API_KEY;
 
   if (!apiKey) {
-    return null; // Signals caller to use default fallback template
+    const fallback = buildColdEmail({ name: recruiterName, company: companyName, role_title, candidate: userProfile });
+    return {
+      subject: fallback.subject,
+      textBody: fallback.textBody,
+      htmlBody: fallback.htmlBody,
+      llm_generated: false
+    };
   }
 
   const profile = userProfile?.parsed_profile || {};
   const candidateName = profile.name || 'Applicant';
   const githubUrl = userProfile?.github_url || profile.github_url || '';
   const linkedinUrl = userProfile?.linkedin_url || profile.linkedin_url || '';
-
-  const { name: recruiterName, company, role_title, notes } = contact;
-  const companyName = company ? company.trim() : 'your team';
 
   const systemPrompt = `You are an expert executive email writer crafting a highly personalized, high-converting cold email for a software developer candidate.
 
@@ -166,11 +182,21 @@ Write a complete recruiter-ready cold email. Output raw JSON only.`;
 
     let raw = completion.choices?.[0]?.message?.content?.trim() ?? '';
 
-    if (raw.startsWith('```')) {
-      raw = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+    // Extract JSON object from raw response
+    const jsonMatch = raw.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      raw = jsonMatch[0];
     }
 
-    const result = JSON.parse(raw);
+    // Sanitize unescaped control characters inside JSON string literals
+    const sanitizedRaw = raw.replace(/[\u0000-\u001F\u007F-\u009F]/g, (match) => {
+      if (match === '\n') return '\\n';
+      if (match === '\r') return '\\r';
+      if (match === '\t') return '\\t';
+      return '';
+    });
+
+    const result = JSON.parse(sanitizedRaw);
 
     if (result?.subject && (result?.textBody || result?.htmlBody)) {
       return {
@@ -181,9 +207,21 @@ Write a complete recruiter-ready cold email. Output raw JSON only.`;
       };
     }
 
-    return null;
+    const fallback = buildColdEmail({ name: recruiterName, company: companyName, role_title, candidate: userProfile });
+    return {
+      subject: fallback.subject,
+      textBody: fallback.textBody,
+      htmlBody: fallback.htmlBody,
+      llm_generated: false
+    };
   } catch (err) {
     console.error(`[groqService] generateFullPersonalizedEmail failed: ${err.message}`);
-    return null;
+    const fallback = buildColdEmail({ name: recruiterName, company: companyName, role_title, candidate: userProfile });
+    return {
+      subject: fallback.subject,
+      textBody: fallback.textBody,
+      htmlBody: fallback.htmlBody,
+      llm_generated: false
+    };
   }
 };

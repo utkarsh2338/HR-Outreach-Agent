@@ -54,7 +54,8 @@ export const generateEmailDraft = async (contact) => {
     name,
     company,
     role_title,
-    opener
+    opener,
+    candidate: userProfile
   });
 
   return {

@@ -7,6 +7,7 @@ import batchDraftRouter from './routes/batchDraft.js';
 import sendTestRouter from './routes/sendTest.js';
 import generateDraftRouter from './routes/generateDraft.js';
 import approveSendRouter from './routes/approveSend.js';
+import profileRouter from './routes/profile.js';
 import { registerDailyDraftJob } from './jobs/dailyDraftJob.js';
 import { registerFollowupJob } from './jobs/followupJob.js';
 import { registerReplyPollJob } from './jobs/replyPollJob.js';
@@ -30,6 +31,9 @@ app.get('/health', (req, res) => {
     cron_enabled: process.env.ENABLE_CRON === 'true'
   });
 });
+
+// Profile & Resume route
+app.use('/api/profile', profileRouter);
 
 // Static-path contact routes must be mounted BEFORE parameterized /:id routes
 app.use('/api/contacts', contactsRouter);

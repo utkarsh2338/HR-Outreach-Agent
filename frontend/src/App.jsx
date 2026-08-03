@@ -5,6 +5,7 @@ const Pipeline      = lazy(() => import('./pages/Pipeline.jsx'));
 const Contacts      = lazy(() => import('./pages/Contacts.jsx'));
 const PendingDrafts = lazy(() => import('./pages/PendingDrafts.jsx'));
 const NeedsAttention = lazy(() => import('./pages/NeedsAttention.jsx'));
+const Profile       = lazy(() => import('./pages/Profile.jsx'));
 
 const PageFallback = () => (
   <div className="flex items-center justify-center h-screen">
@@ -19,6 +20,7 @@ const App = () => (
       <Route path="/contacts"          element={<Contacts />} />
       <Route path="/drafts"            element={<PendingDrafts />} />
       <Route path="/needs-attention"   element={<NeedsAttention />} />
+      <Route path="/profile"           element={<Profile />} />
       <Route path="*"                  element={<Navigate to="/" replace />} />
     </Routes>
   </Suspense>

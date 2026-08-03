@@ -5,6 +5,7 @@ import {
   RiFileList3Line,
   RiBellLine,
   RiCircleFill,
+  RiUser3Line,
 } from 'react-icons/ri';
 import { cn } from '../../utils/cn.js';
 import { usePendingDrafts } from '../../hooks/useEmailLogs.js';
@@ -33,6 +34,11 @@ const NAV_ITEMS = [
     label: 'Needs Attention',
     icon: RiBellLine,
     countKey: 'attention',
+  },
+  {
+    to: '/profile',
+    label: 'My Profile & Resume',
+    icon: RiUser3Line,
   },
 ];
 

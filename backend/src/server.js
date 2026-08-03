@@ -10,9 +10,7 @@ import sendTestRouter from './routes/sendTest.js';
 import generateDraftRouter from './routes/generateDraft.js';
 import approveSendRouter from './routes/approveSend.js';
 import profileRouter from './routes/profile.js';
-import { registerDailyDraftJob } from './jobs/dailyDraftJob.js';
-import { registerFollowupJob } from './jobs/followupJob.js';
-import { registerReplyPollJob } from './jobs/replyPollJob.js';
+import { registerUserAgentCron } from './jobs/userAgentCron.js';
 
 dotenv.config();
 
@@ -69,10 +67,8 @@ const startServer = async () => {
 
     // Register cron jobs only when explicitly enabled
     if (process.env.ENABLE_CRON === 'true') {
-      console.log('[cron] ENABLE_CRON=true — registering scheduled jobs...');
-      registerDailyDraftJob();
-      registerFollowupJob();
-      registerReplyPollJob();
+      console.log('[cron] ENABLE_CRON=true — registering unified agent job...');
+      registerUserAgentCron();
     } else {
       console.log('[cron] ENABLE_CRON not set — scheduled jobs are disabled.');
     }

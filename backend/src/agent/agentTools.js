@@ -4,6 +4,7 @@ import User from '../models/User.js';
 import JobLog from '../models/JobLog.js';
 import { searchCompanyContext } from './companyLookupService.js';
 import { classifyReply } from '../services/replyClassifierService.js';
+import { isContactInCooldown, isBlocked, checkDailyQuota } from '../utils/guardrails.js';
 
 /**
  * Tool definitions exposed to the Groq LLM agent (JSON Schema format)
@@ -129,21 +130,24 @@ export const executeAgentTool = async (name, args, userId) => {
     }
 
     case 'check_send_quota': {
-      const user = await User.findById(userId);
-      const limit = user?.daily_send_limit || 20;
-      const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
-      const sent_24h = await EmailLog.countDocuments({
-        user_id: userId,
-        direction: 'outbound',
-        log_status: 'sent',
-        sent_at: { $gte: since }
-      });
-      return { daily_limit: limit, sent_24h, remaining: Math.max(0, limit - sent_24h) };
+      const quota = await checkDailyQuota(userId);
+      return quota;
     }
 
     case 'draft_email': {
+      const user = await User.findById(userId);
       const contact = await Contact.findOne({ _id: args.contact_id, user_id: userId });
       if (!contact) return { error: 'Contact not found for user' };
+
+      // Guardrail Check: Blocklist
+      if (isBlocked(user, contact.email, contact.company_domain)) {
+        return { error: 'Contact is blocked by user blocklist settings' };
+      }
+
+      // Guardrail Check: 24h Cooldown
+      if (await isContactInCooldown(userId, contact._id)) {
+        return { error: 'Contact is currently in 24h communication cooldown' };
+      }
 
       const html_body = args.body.replace(/\n/g, '<br>');
 
@@ -155,7 +159,7 @@ export const executeAgentTool = async (name, args, userId) => {
         body: args.body,
         html_body,
         llm_generated: true,
-        log_status: 'draft_pending'
+        log_status: 'draft_pending' // Mandatory gate
       });
 
       await Contact.findOneAndUpdate(
@@ -163,7 +167,7 @@ export const executeAgentTool = async (name, args, userId) => {
         { status: 'draft_pending' }
       );
 
-      // Audit agent reasoning in JobLog
+      // Audit agent decision in JobLog
       await JobLog.create({
         user_id: userId,
         job_name: 'agent_draft_email',

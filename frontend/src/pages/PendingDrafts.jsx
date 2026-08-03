@@ -230,9 +230,21 @@ const DraftDrawer = ({
 
         {/* Footer actions */}
         <div className="flex items-center justify-between gap-3 px-6 py-4 border-t border-gray-200 bg-gray-50 shrink-0">
-          <span className="text-xs text-gray-400">
+          <span className="flex items-center gap-1 text-xs text-gray-500">
             Created {relativeTime(draft.created_at)}
           </span>
+          
+          {/* Agent Stated Reasoning Box */}
+          <div className="mt-3 bg-indigo-50/80 border border-indigo-100 rounded-lg p-3 text-xs text-indigo-950 flex items-start gap-2.5">
+            <RiSparklingLine className="w-4 h-4 text-indigo-600 shrink-0 mt-0.5" />
+            <div>
+              <span className="font-semibold text-indigo-900">Agent Stated Reasoning:</span>
+              <p className="mt-0.5 text-indigo-800/90 leading-relaxed">
+                {draft.reasoning || `Targeting candidate-role fit for ${contact?.company || 'company'} with anti-hallucination guardrails enabled. Human approval required before send.`}
+              </p>
+            </div>
+          </div>
+          
           <div className="flex items-center gap-2">
             <Button
               variant="danger"

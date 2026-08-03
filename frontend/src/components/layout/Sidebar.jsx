@@ -1,4 +1,4 @@
-import { NavLink, useLocation } from 'react-router-dom';
+import { NavLink } from 'react-router-dom';
 import {
   RiBarChartBoxLine,
   RiContactsLine,
@@ -6,10 +6,13 @@ import {
   RiBellLine,
   RiCircleFill,
   RiUser3Line,
+  RiSettings4Line,
+  RiLogoutBoxRLine
 } from 'react-icons/ri';
 import { cn } from '../../utils/cn.js';
 import { usePendingDrafts } from '../../hooks/useEmailLogs.js';
 import { useNeedsAttention } from '../../hooks/useContacts.js';
+import { useAuth } from '../../context/AuthContext.jsx';
 
 const NAV_ITEMS = [
   {
@@ -39,6 +42,11 @@ const NAV_ITEMS = [
     to: '/profile',
     label: 'My Profile & Resume',
     icon: RiUser3Line,
+  },
+  {
+    to: '/settings',
+    label: 'Settings & Guardrails',
+    icon: RiSettings4Line,
   },
 ];
 
@@ -84,6 +92,7 @@ const NavItem = ({ to, label, icon: Icon, end, count, urgent }) => {
 export const Sidebar = () => {
   const { data: draftsData } = usePendingDrafts({ limit: 1, page: 1 });
   const { data: attentionData } = useNeedsAttention({ limit: 1, page: 1 });
+  const { user, logout } = useAuth();
 
   const counts = {
     drafts: draftsData?.total ?? 0,
@@ -112,11 +121,21 @@ export const Sidebar = () => {
         ))}
       </nav>
 
-      {/* Footer: API status */}
-      <div className="px-4 py-3 border-t border-gray-200 shrink-0">
-        <p className="text-2xs text-gray-400 truncate">
-          {import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000'}
-        </p>
+      {/* User profile & logout footer */}
+      <div className="px-3 py-3 border-t border-gray-200 shrink-0 bg-gray-50/50 space-y-2">
+        {user && (
+          <div className="px-1">
+            <p className="text-xs font-semibold text-gray-800 truncate">{user.name}</p>
+            <p className="text-2xs text-gray-500 truncate">{user.email}</p>
+          </div>
+        )}
+        <button
+          onClick={logout}
+          className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded text-xs font-medium text-red-600 hover:bg-red-50 transition-colors"
+        >
+          <RiLogoutBoxRLine className="w-3.5 h-3.5" />
+          <span>Sign Out</span>
+        </button>
       </div>
     </aside>
   );

@@ -31,6 +31,83 @@ const isWeakResponse = (text) => {
 };
 
 /**
+ * Robust JSON parser for LLM outputs that safely handles literal unescaped
+ * control characters (newlines/tabs) inside string values without breaking structural JSON syntax.
+ */
+const safeParseJSON = (rawText) => {
+  if (!rawText || typeof rawText !== 'string') return null;
+
+  let text = rawText.trim();
+
+  // Strip markdown code fences if present
+  text = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+
+  // Extract outermost JSON object {}
+  const match = text.match(/\{[\s\S]*\}/);
+  if (match) {
+    text = match[0];
+  }
+
+  // 1. Try direct JSON.parse first
+  try {
+    return JSON.parse(text);
+  } catch (_) {
+    // Direct parse failed, proceed to string-aware sanitization
+  }
+
+  // 2. Sanitize unescaped newlines and control characters inside string values ONLY
+  try {
+    let insideString = false;
+    let escaped = false;
+    let sanitized = '';
+
+    for (let i = 0; i < text.length; i++) {
+      const char = text[i];
+
+      if (char === '"' && !escaped) {
+        insideString = !insideString;
+        sanitized += char;
+      } else if (insideString) {
+        if (char === '\n') {
+          sanitized += '\\n';
+        } else if (char === '\r') {
+          sanitized += '\\r';
+        } else if (char === '\t') {
+          sanitized += '\\t';
+        } else {
+          sanitized += char;
+        }
+      } else {
+        sanitized += char;
+      }
+
+      if (char === '\\' && !escaped) {
+        escaped = true;
+      } else {
+        escaped = false;
+      }
+    }
+
+    return JSON.parse(sanitized);
+  } catch (err) {
+    // 3. Fallback: Regex extraction for key properties if JSON syntax is damaged
+    const subjectMatch = text.match(/"subject"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"/i);
+    const textBodyMatch = text.match(/"textBody"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"/i);
+    const htmlBodyMatch = text.match(/"htmlBody"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"/i);
+
+    if (subjectMatch || textBodyMatch) {
+      return {
+        subject: subjectMatch ? subjectMatch[1].replace(/\\n/g, '\n').replace(/\\"/g, '"') : '',
+        textBody: textBodyMatch ? textBodyMatch[1].replace(/\\n/g, '\n').replace(/\\"/g, '"') : '',
+        htmlBody: htmlBodyMatch ? htmlBodyMatch[1].replace(/\\n/g, '\n').replace(/\\"/g, '"') : ''
+      };
+    }
+
+    throw err;
+  }
+};
+
+/**
  * Generates a personalized 1-2 sentence cold email opener using Groq's Llama 3.3 70B model.
  * Falls back gracefully to a neutral static opener on any error or weak response.
  *
@@ -179,23 +256,8 @@ Write a complete recruiter-ready cold email. Output raw JSON only.`;
       stream: false
     });
 
-    let raw = completion.choices?.[0]?.message?.content?.trim() ?? '';
-
-    // Extract JSON object from raw response
-    const jsonMatch = raw.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-      raw = jsonMatch[0];
-    }
-
-    // Sanitize unescaped control characters inside JSON string literals
-    const sanitizedRaw = raw.replace(/[\u0000-\u001F\u007F-\u009F]/g, (match) => {
-      if (match === '\n') return '\\n';
-      if (match === '\r') return '\\r';
-      if (match === '\t') return '\\t';
-      return '';
-    });
-
-    const result = JSON.parse(sanitizedRaw);
+    const raw = completion.choices?.[0]?.message?.content?.trim() ?? '';
+    const result = safeParseJSON(raw);
 
     if (result?.subject && (result?.textBody || result?.htmlBody)) {
       return {

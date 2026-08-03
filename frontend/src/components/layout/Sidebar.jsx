@@ -90,7 +90,6 @@ const NavItem = ({ to, label, icon: Icon, end, count, urgent }) => {
 export const Sidebar = () => {
   const { data: draftsData } = usePendingDrafts({ limit: 1, page: 1 });
   const { data: attentionData } = useNeedsAttention({ limit: 1, page: 1 });
-  const { user, logout } = useAuth();
 
   const counts = {
     drafts: draftsData?.total ?? 0,

@@ -4,6 +4,12 @@ const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const contactSchema = new mongoose.Schema(
   {
+    user_id: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      required: true,
+      index: true
+    },
     name: {
       type: String,
       required: [true, 'Name is required'],
@@ -12,7 +18,6 @@ const contactSchema = new mongoose.Schema(
     email: {
       type: String,
       required: [true, 'Email is required'],
-      unique: true,
       lowercase: true,
       trim: true,
       match: [EMAIL_REGEX, 'Please provide a valid email address']
@@ -79,8 +84,9 @@ const contactSchema = new mongoose.Schema(
   }
 );
 
-// Index for text search
-contactSchema.index({ name: 'text', email: 'text', company: 'text' });
+// Compound index for user-scoped email uniqueness and text search
+contactSchema.index({ user_id: 1, email: 1 }, { unique: true });
+contactSchema.index({ user_id: 1, name: 'text', email: 'text', company: 'text' });
 
 const Contact = mongoose.model('Contact', contactSchema);
 

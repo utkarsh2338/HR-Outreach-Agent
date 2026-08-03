@@ -5,23 +5,23 @@ import { generateEmailDraft } from './emailDraftService.js';
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
- * Core batch draft generation logic, usable by both the HTTP route
- * and the daily cron job without duplicating code.
- *
- * Selects up to `limit` contacts with status "queued" or "new" (FIFO),
- * generates a personalized draft for each, stores a draft_pending EmailLog,
+ * Core batch draft generation logic.
+ * Selects up to `limit` contacts with status "queued" or "new" for a user (FIFO),
+ * generates a personalized draft for each, stores a draft_pending EmailLog with user_id,
  * and updates the contact status to "draft_pending".
  *
  * @param {object} options
- * @param {number} options.limit              - Max contacts to process
- * @param {number} [options.delayMs=1500]     - Inter-call delay between Groq requests (ms)
- * @returns {Promise<{
- *   drafted: Array,
- *   failed: Array
- * }>}
+ * @param {string|ObjectId} options.userId  - User ID to scope query
+ * @param {number} options.limit           - Max contacts to process
+ * @param {number} [options.delayMs=1500]  - Inter-call delay between Groq requests (ms)
  */
-export const runBatchDraftGeneration = async ({ limit, delayMs = 1500 }) => {
-  const contacts = await Contact.find({ status: { $in: ['queued', 'new'] } })
+export const runBatchDraftGeneration = async ({ userId, limit, delayMs = 1500 }) => {
+  const query = { status: { $in: ['queued', 'new'] } };
+  if (userId) {
+    query.user_id = userId;
+  }
+
+  const contacts = await Contact.find(query)
     .sort({ createdAt: 1 }) // oldest first — FIFO
     .limit(limit);
 
@@ -43,6 +43,7 @@ export const runBatchDraftGeneration = async ({ limit, delayMs = 1500 }) => {
       const { subject, htmlBody, textBody, llm_generated } = await generateEmailDraft(contact);
 
       const draft = await EmailLog.create({
+        user_id: contact.user_id || userId,
         contact_id: contact._id,
         direction: 'outbound',
         subject,

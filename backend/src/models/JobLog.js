@@ -2,6 +2,12 @@ import mongoose from 'mongoose';
 
 const jobLogSchema = new mongoose.Schema(
   {
+    user_id: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      required: true,
+      index: true
+    },
     job_name: {
       type: String,
       required: true,
@@ -32,8 +38,8 @@ const jobLogSchema = new mongoose.Schema(
   }
 );
 
-// Index to query recent runs per job efficiently
-jobLogSchema.index({ job_name: 1, run_at: -1 });
+// Index to query recent runs per job efficiently per user
+jobLogSchema.index({ user_id: 1, job_name: 1, run_at: -1 });
 
 const JobLog = mongoose.model('JobLog', jobLogSchema);
 

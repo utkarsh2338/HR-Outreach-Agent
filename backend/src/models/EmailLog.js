@@ -2,6 +2,12 @@ import mongoose from 'mongoose';
 
 const emailLogSchema = new mongoose.Schema(
   {
+    user_id: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      required: true,
+      index: true
+    },
     contact_id: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Contact',
@@ -80,11 +86,11 @@ const emailLogSchema = new mongoose.Schema(
   }
 );
 
-// Index for rate-limiting queries (count sent in last N hours)
-emailLogSchema.index({ direction: 1, sent_at: -1 });
+// Index for rate-limiting queries (count sent in last N hours per user)
+emailLogSchema.index({ user_id: 1, direction: 1, sent_at: -1 });
 
-// Index for fetching pending drafts quickly
-emailLogSchema.index({ log_status: 1, createdAt: -1 });
+// Index for fetching pending drafts quickly per user
+emailLogSchema.index({ user_id: 1, log_status: 1, createdAt: -1 });
 
 const EmailLog = mongoose.model('EmailLog', emailLogSchema);
 

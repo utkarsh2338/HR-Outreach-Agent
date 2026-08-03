@@ -1,8 +1,10 @@
 import express from 'express';
 import contactsRouter from '../src/routes/contacts.js';
 import Contact from '../src/models/Contact.js';
+import User from '../src/models/User.js';
 import mongoose from 'mongoose';
 import dotenv from 'dotenv';
+import { generateToken } from '../src/middleware/authMiddleware.js';
 
 dotenv.config();
 
@@ -20,8 +22,23 @@ async function runTests() {
   await mongoose.connect(process.env.MONGODB_URI);
   console.log('Connected to MongoDB!');
 
-  // Cleanup test data
-  await Contact.deleteMany({ email: /@test-hr-agent\.com$/ });
+  let testUser = await User.findOne({ email: 'utkarshshukla1007@gmail.com' });
+  if (!testUser) {
+    testUser = await User.create({
+      name: 'Utkarsh Shukla',
+      email: 'utkarshshukla1007@gmail.com',
+      google_id: 'test_legacy_google_id_001'
+    });
+  }
+
+  const token = generateToken(testUser);
+  const headers = {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${token}`
+  };
+
+  // Cleanup test data for this test user
+  await Contact.deleteMany({ user_id: testUser._id, email: /@test-hr-agent\.com$/ });
 
   // Start test server
   const server = app.listen(5099, async () => {
@@ -31,7 +48,7 @@ async function runTests() {
       // 1. Create single contact
       const createRes = await fetch('http://localhost:5099/api/contacts', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({
           name: 'Jane Doe',
           email: 'jane.doe@test-hr-agent.com',
@@ -47,7 +64,7 @@ async function runTests() {
       // 2. Duplicate create test
       const dupRes = await fetch('http://localhost:5099/api/contacts', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({
           name: 'Jane Duplicate',
           email: 'jane.doe@test-hr-agent.com',
@@ -59,7 +76,7 @@ async function runTests() {
       // 3. Bulk import
       const bulkRes = await fetch('http://localhost:5099/api/contacts/bulk', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify([
           { name: 'John Smith', email: 'john.smith@test-hr-agent.com', company: 'TechCorp' },
           { name: 'Alice Walker', email: 'alice.walker@test-hr-agent.com', company: 'InnovateInc' },
@@ -71,19 +88,19 @@ async function runTests() {
       console.log('Bulk summary:', { created: bulkData.created, skipped: bulkData.skipped, errors: bulkData.errors.length });
 
       // 4. GET list with filtering
-      const listRes = await fetch('http://localhost:5099/api/contacts?company=Acme&page=1&limit=10');
+      const listRes = await fetch('http://localhost:5099/api/contacts?company=Acme&page=1&limit=10', { headers });
       const listData = await listRes.json();
       console.log('GET /api/contacts status:', listRes.status, 'Total items:', listData.total);
 
       // 5. GET by ID
-      const getRes = await fetch(`http://localhost:5099/api/contacts/${created._id}`);
+      const getRes = await fetch(`http://localhost:5099/api/contacts/${created._id}`, { headers });
       const getData = await getRes.json();
       console.log('GET /api/contacts/:id status:', getRes.status, 'Name:', getData.name);
 
       // 6. PATCH contact
       const patchRes = await fetch(`http://localhost:5099/api/contacts/${created._id}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({ status: 'queued', notes: 'First touch scheduled' })
       });
       const patchData = await patchRes.json();
@@ -91,12 +108,13 @@ async function runTests() {
 
       // 7. DELETE contact
       const delRes = await fetch(`http://localhost:5099/api/contacts/${created._id}`, {
-        method: 'DELETE'
+        method: 'DELETE',
+        headers
       });
       console.log('DELETE /api/contacts/:id status:', delRes.status);
 
       // Cleanup remaining test data
-      await Contact.deleteMany({ email: /@test-hr-agent\.com$/ });
+      await Contact.deleteMany({ user_id: testUser._id, email: /@test-hr-agent\.com$/ });
       console.log('All tests completed successfully!');
     } catch (err) {
       console.error('Test execution error:', err);

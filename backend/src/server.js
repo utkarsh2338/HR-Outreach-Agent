@@ -1,7 +1,9 @@
 import express from 'express';
 import cors from 'cors';
+import cookieParser from 'cookie-parser';
 import dotenv from 'dotenv';
 import connectDB from './config/db.js';
+import authRouter from './routes/auth.js';
 import contactsRouter from './routes/contacts.js';
 import batchDraftRouter from './routes/batchDraft.js';
 import sendTestRouter from './routes/sendTest.js';
@@ -18,8 +20,14 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 
 // Middleware
-app.use(cors());
+app.use(
+  cors({
+    origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+    credentials: true
+  })
+);
 app.use(express.json());
+app.use(cookieParser());
 
 // Routes
 app.get('/health', (req, res) => {
@@ -31,6 +39,9 @@ app.get('/health', (req, res) => {
     cron_enabled: process.env.ENABLE_CRON === 'true'
   });
 });
+
+// Auth route
+app.use('/api/auth', authRouter);
 
 // Profile & Resume route
 app.use('/api/profile', profileRouter);

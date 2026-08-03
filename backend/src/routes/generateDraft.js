@@ -3,12 +3,15 @@ import mongoose from 'mongoose';
 import Contact from '../models/Contact.js';
 import EmailLog from '../models/EmailLog.js';
 import { generateEmailDraft } from '../services/emailDraftService.js';
+import { requireAuth } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
 
+router.use(requireAuth);
+
 /**
  * @route   POST /api/contacts/:id/generate-draft
- * @desc    Generate a personalized email draft using Groq + fixed template.
+ * @desc    Generate a personalized email draft for logged-in user.
  *          Stores it as a draft_pending EmailLog. Does NOT send.
  */
 router.post('/:id/generate-draft', async (req, res) => {
@@ -19,7 +22,7 @@ router.post('/:id/generate-draft', async (req, res) => {
       return res.status(400).json({ error: 'Invalid contact ID format' });
     }
 
-    const contact = await Contact.findById(id);
+    const contact = await Contact.findOne({ _id: id, user_id: req.user._id });
     if (!contact) {
       return res.status(404).json({ error: 'Contact not found' });
     }
@@ -29,6 +32,7 @@ router.post('/:id/generate-draft', async (req, res) => {
 
     // Store as a pending draft in EmailLog
     const draft = await EmailLog.create({
+      user_id: req.user._id,
       contact_id: contact._id,
       direction: 'outbound',
       subject,

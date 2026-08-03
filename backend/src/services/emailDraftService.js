@@ -20,11 +20,14 @@ import { buildColdEmail } from '../templates/coldEmail.js';
  * }>}
  */
 export const generateEmailDraft = async (contact) => {
-  const { name, company, role_title, notes } = contact;
+  const { name, company, role_title, notes, user_id } = contact;
+  let userProfile = null;
 
-  // Step 1: Check if user profile is populated with analyzed resume / github / linkedin data
+  // Step 1: Check if user profile is populated for candidate
   try {
-    const userProfile = await UserProfile.getProfile();
+    if (user_id) {
+      userProfile = await UserProfile.getProfile(user_id);
+    }
 
     if (userProfile && (userProfile.resume_text || userProfile.parsed_profile?.name || userProfile.github_url)) {
       const personalizedDraft = await generateFullPersonalizedEmail({ userProfile, contact });

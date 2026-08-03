@@ -3,12 +3,15 @@ import mongoose from 'mongoose';
 import Contact from '../models/Contact.js';
 import EmailLog from '../models/EmailLog.js';
 import { sendEmail } from '../services/gmailService.js';
+import { requireAuth } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
 
+router.use(requireAuth);
+
 /**
  * @route   GET /api/email-logs/pending
- * @desc    List all draft_pending EmailLogs with contact info populated.
+ * @desc    List all draft_pending EmailLogs for logged-in user with contact info populated.
  *          Supports pagination via ?page and ?limit query params.
  */
 router.get('/pending', async (req, res) => {
@@ -18,12 +21,12 @@ router.get('/pending', async (req, res) => {
     const skip = (page - 1) * limit;
 
     const [drafts, total] = await Promise.all([
-      EmailLog.find({ log_status: 'draft_pending' })
+      EmailLog.find({ user_id: req.user._id, log_status: 'draft_pending' })
         .populate('contact_id', 'name email company role_title status tags')
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit),
-      EmailLog.countDocuments({ log_status: 'draft_pending' })
+      EmailLog.countDocuments({ user_id: req.user._id, log_status: 'draft_pending' })
     ]);
 
     return res.status(200).json({
@@ -52,8 +55,7 @@ router.get('/pending', async (req, res) => {
 
 /**
  * @route   PATCH /api/email-logs/:id/discard
- * @desc    Discard a draft_pending EmailLog — sets log_status to "failed"
- *          and reverts the contact status to "queued" for re-processing.
+ * @desc    Discard a draft_pending EmailLog scoped to user (404 if cross-user)
  */
 router.patch('/:id/discard', async (req, res) => {
   try {
@@ -62,7 +64,7 @@ router.patch('/:id/discard', async (req, res) => {
       return res.status(400).json({ error: 'Invalid email log ID format' });
     }
 
-    const draft = await EmailLog.findById(id);
+    const draft = await EmailLog.findOne({ _id: id, user_id: req.user._id });
     if (!draft) return res.status(404).json({ error: 'Email log not found' });
 
     if (draft.log_status !== 'draft_pending') {
@@ -75,7 +77,10 @@ router.patch('/:id/discard', async (req, res) => {
     await draft.save();
 
     if (draft.contact_id) {
-      await Contact.findByIdAndUpdate(draft.contact_id, { status: 'queued' });
+      await Contact.findOneAndUpdate(
+        { _id: draft.contact_id, user_id: req.user._id },
+        { status: 'queued' }
+      );
     }
 
     return res.status(200).json({ message: 'Draft discarded.', email_log_id: draft._id });
@@ -86,7 +91,7 @@ router.patch('/:id/discard', async (req, res) => {
 
 /**
  * @route   PATCH /api/email-logs/:id
- * @desc    Update a draft_pending EmailLog's subject, body, and/or html_body
+ * @desc    Update a draft_pending EmailLog's subject, body, and/or html_body scoped to user
  */
 router.patch('/:id', async (req, res) => {
   try {
@@ -96,7 +101,7 @@ router.patch('/:id', async (req, res) => {
     }
 
     const { subject, body, html_body } = req.body;
-    const draft = await EmailLog.findById(id);
+    const draft = await EmailLog.findOne({ _id: id, user_id: req.user._id });
     if (!draft) return res.status(404).json({ error: 'Email log not found' });
 
     if (draft.log_status !== 'draft_pending') {
@@ -133,7 +138,7 @@ router.patch('/:id', async (req, res) => {
 /**
  * @route   POST /api/email-logs/:id/approve-and-send
  * @desc    Human-approval step: take a draft_pending EmailLog, send it via Gmail,
- *          update log status to "sent", and update the contact status to "sent".
+ *          update log status to "sent", and update contact status to "sent".
  */
 router.post('/:id/approve-and-send', async (req, res) => {
   try {
@@ -143,8 +148,7 @@ router.post('/:id/approve-and-send', async (req, res) => {
       return res.status(400).json({ error: 'Invalid email log ID format' });
     }
 
-    // Fetch the draft
-    const draft = await EmailLog.findById(id).populate('contact_id');
+    const draft = await EmailLog.findOne({ _id: id, user_id: req.user._id }).populate('contact_id');
     if (!draft) {
       return res.status(404).json({ error: 'Email log (draft) not found' });
     }
@@ -170,11 +174,12 @@ router.post('/:id/approve-and-send', async (req, res) => {
       return res.status(404).json({ error: 'Contact associated with this draft no longer exists' });
     }
 
-    // --- Rate Limiter ---
-    const DAILY_SEND_LIMIT = parseInt(process.env.DAILY_SEND_LIMIT || '20', 10);
+    // --- User Specific Rate Limiter ---
+    const DAILY_SEND_LIMIT = req.user.daily_send_limit || parseInt(process.env.DAILY_SEND_LIMIT || '20', 10);
     const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
 
     const sentCount = await EmailLog.countDocuments({
+      user_id: req.user._id,
       direction: 'outbound',
       log_status: 'sent',
       sent_at: { $gte: since }
@@ -193,23 +198,22 @@ router.post('/:id/approve-and-send', async (req, res) => {
       to: contact.email,
       subject: draft.subject,
       htmlBody: draft.html_body || draft.body,
-      textBody: draft.body
+      textBody: draft.body,
+      user: req.user
     });
 
     const sentAt = new Date();
 
-    // Update draft log to "sent" and store Gmail thread identifiers
     draft.log_status = 'sent';
     draft.sent_at = sentAt;
     draft.gmail_message_id = gmail_message_id;
     draft.gmail_thread_id = gmail_thread_id;
     await draft.save();
 
-    // Update contact status and last_contacted_at
-    await Contact.findByIdAndUpdate(contact._id, {
-      status: 'sent',
-      last_contacted_at: sentAt
-    });
+    await Contact.findOneAndUpdate(
+      { _id: contact._id, user_id: req.user._id },
+      { status: 'sent', last_contacted_at: sentAt }
+    );
 
     return res.status(200).json({
       message: 'Draft approved and email sent successfully.',
@@ -231,10 +235,12 @@ router.post('/:id/approve-and-send', async (req, res) => {
       }
     });
   } catch (error) {
-    // Mark draft as failed so the user knows
     if (mongoose.Types.ObjectId.isValid(req.params.id)) {
       try {
-        await EmailLog.findByIdAndUpdate(req.params.id, { log_status: 'failed' });
+        await EmailLog.findOneAndUpdate(
+          { _id: req.params.id, user_id: req.user._id },
+          { log_status: 'failed' }
+        );
       } catch (_) {
         // Ignore secondary error
       }

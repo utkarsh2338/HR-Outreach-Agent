@@ -4,8 +4,12 @@ import multer from 'multer';
 import Papa from 'papaparse';
 import Contact from '../models/Contact.js';
 import EmailLog from '../models/EmailLog.js';
+import { requireAuth } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
+
+// Require auth on all contact routes
+router.use(requireAuth);
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -28,7 +32,7 @@ const ALLOWED_STATUSES = [
 
 /**
  * @route   POST /api/contacts
- * @desc    Create a new contact
+ * @desc    Create a new contact scoped to user
  */
 router.post('/', async (req, res) => {
   try {
@@ -53,11 +57,14 @@ router.post('/', async (req, res) => {
       });
     }
 
-    const newContact = await Contact.create(req.body);
+    const newContact = await Contact.create({
+      ...req.body,
+      user_id: req.user._id
+    });
     return res.status(201).json(newContact);
   } catch (error) {
     if (error.code === 11000) {
-      return res.status(409).json({ error: 'Contact with this email already exists' });
+      return res.status(409).json({ error: 'Contact with this email already exists in your account' });
     }
     if (error.name === 'ValidationError') {
       return res.status(400).json({ error: error.message });
@@ -68,7 +75,7 @@ router.post('/', async (req, res) => {
 
 /**
  * @route   POST /api/contacts/bulk
- * @desc    Bulk import contacts from JSON array, skipping duplicates by email
+ * @desc    Bulk import contacts from JSON array, skipping duplicates by email for this user
  */
 router.post('/bulk', async (req, res) => {
   try {
@@ -128,7 +135,7 @@ router.post('/bulk', async (req, res) => {
       }
 
       emailsInBatch.add(email);
-      candidates.push({ ...item, email, name, company });
+      candidates.push({ ...item, user_id: req.user._id, email, name, company });
     });
 
     if (candidates.length === 0) {
@@ -140,9 +147,12 @@ router.post('/bulk', async (req, res) => {
       });
     }
 
-    // Phase 2: Query DB for existing emails
+    // Phase 2: Query DB for existing emails for this user
     const candidateEmails = candidates.map((c) => c.email);
-    const existingContacts = await Contact.find({ email: { $in: candidateEmails } }).select('email');
+    const existingContacts = await Contact.find({
+      user_id: req.user._id,
+      email: { $in: candidateEmails }
+    }).select('email');
     const existingEmailSet = new Set(existingContacts.map((c) => c.email.toLowerCase()));
 
     const toInsert = candidates.filter((c) => !existingEmailSet.has(c.email));
@@ -167,7 +177,7 @@ router.post('/bulk', async (req, res) => {
 
 /**
  * @route   POST /api/contacts/import-csv
- * @desc    Import contacts from uploaded CSV file
+ * @desc    Import contacts from uploaded CSV file scoped to user
  */
 router.post('/import-csv', upload.single('file'), async (req, res) => {
   try {
@@ -203,7 +213,7 @@ router.post('/import-csv', upload.single('file'), async (req, res) => {
     let batchDuplicatesCount = 0;
 
     rows.forEach((row, index) => {
-      const rowNum = index + 2; // Original CSV row number (accounting for 1 header row)
+      const rowNum = index + 2; // Original CSV row number
 
       const name = row.name ? String(row.name).trim() : '';
       const email = row.email ? String(row.email).trim().toLowerCase() : '';
@@ -233,6 +243,7 @@ router.post('/import-csv', upload.single('file'), async (req, res) => {
 
       emailsInBatch.add(email);
       candidates.push({
+        user_id: req.user._id,
         name,
         email,
         company,
@@ -248,7 +259,10 @@ router.post('/import-csv', upload.single('file'), async (req, res) => {
 
     if (candidates.length > 0) {
       const candidateEmails = candidates.map((c) => c.email);
-      const existingContacts = await Contact.find({ email: { $in: candidateEmails } }).select('email');
+      const existingContacts = await Contact.find({
+        user_id: req.user._id,
+        email: { $in: candidateEmails }
+      }).select('email');
       const existingEmailSet = new Set(existingContacts.map((c) => c.email.toLowerCase()));
 
       const toInsert = candidates.filter((c) => !existingEmailSet.has(c.email));
@@ -273,9 +287,7 @@ router.post('/import-csv', upload.single('file'), async (req, res) => {
 
 /**
  * @route   GET /api/contacts/needs-attention
- * @desc    Return contacts with needs_attention=true (classified as "interested"),
- *          joined with their most recent inbound reply, sorted newest first.
- *          Supports pagination via ?page and ?limit.
+ * @desc    Return contacts with needs_attention=true scoped to user
  */
 router.get('/needs-attention', async (req, res) => {
   try {
@@ -284,21 +296,21 @@ router.get('/needs-attention', async (req, res) => {
     const skip = (page - 1) * limit;
 
     const [contacts, total] = await Promise.all([
-      Contact.find({ needs_attention: true })
+      Contact.find({ user_id: req.user._id, needs_attention: true })
         .sort({ updatedAt: -1 })
         .skip(skip)
         .limit(limit),
-      Contact.countDocuments({ needs_attention: true })
+      Contact.countDocuments({ user_id: req.user._id, needs_attention: true })
     ]);
 
     // Fetch most recent inbound reply for each contact
     const contactIds = contacts.map((c) => c._id);
     const recentReplies = await EmailLog.find({
+      user_id: req.user._id,
       contact_id: { $in: contactIds },
       direction: 'inbound'
     }).sort({ createdAt: -1 });
 
-    // Build a map: contact_id -> most recent reply
     const replyMap = new Map();
     for (const reply of recentReplies) {
       const key = reply.contact_id.toString();
@@ -329,13 +341,13 @@ router.get('/needs-attention', async (req, res) => {
 
 /**
  * @route   GET /api/contacts
- * @desc    List contacts with filtering & pagination
+ * @desc    List contacts with filtering & pagination scoped to user
  */
 router.get('/', async (req, res) => {
   try {
     const { status, company, tag, search, page = 1, limit = 10 } = req.query;
 
-    const query = {};
+    const query = { user_id: req.user._id };
 
     if (status) {
       query.status = status;
@@ -347,10 +359,15 @@ router.get('/', async (req, res) => {
       query.tags = tag;
     }
     if (search) {
-      query.$or = [
-        { name: { $regex: search, $options: 'i' } },
-        { email: { $regex: search, $options: 'i' } },
-        { company: { $regex: search, $options: 'i' } }
+      query.$and = [
+        { user_id: req.user._id },
+        {
+          $or: [
+            { name: { $regex: search, $options: 'i' } },
+            { email: { $regex: search, $options: 'i' } },
+            { company: { $regex: search, $options: 'i' } }
+          ]
+        }
       ];
     }
 
@@ -377,7 +394,7 @@ router.get('/', async (req, res) => {
 
 /**
  * @route   GET /api/contacts/:id
- * @desc    Get a single contact by ID
+ * @desc    Get a single contact by ID scoped to user (404 if cross-user access)
  */
 router.get('/:id', async (req, res) => {
   try {
@@ -387,7 +404,7 @@ router.get('/:id', async (req, res) => {
       return res.status(400).json({ error: 'Invalid contact ID format' });
     }
 
-    const contact = await Contact.findById(id);
+    const contact = await Contact.findOne({ _id: id, user_id: req.user._id });
     if (!contact) {
       return res.status(404).json({ error: 'Contact not found' });
     }
@@ -400,7 +417,7 @@ router.get('/:id', async (req, res) => {
 
 /**
  * @route   PATCH /api/contacts/:id
- * @desc    Update contact fields
+ * @desc    Update contact fields scoped to user (404 if cross-user access)
  */
 router.patch('/:id', async (req, res) => {
   try {
@@ -424,10 +441,17 @@ router.patch('/:id', async (req, res) => {
       });
     }
 
-    const updatedContact = await Contact.findByIdAndUpdate(id, req.body, {
-      returnDocument: 'after',
-      runValidators: true
-    });
+    // Do not allow changing user_id via update
+    delete req.body.user_id;
+
+    const updatedContact = await Contact.findOneAndUpdate(
+      { _id: id, user_id: req.user._id },
+      req.body,
+      {
+        returnDocument: 'after',
+        runValidators: true
+      }
+    );
 
     if (!updatedContact) {
       return res.status(404).json({ error: 'Contact not found' });
@@ -436,7 +460,7 @@ router.patch('/:id', async (req, res) => {
     return res.status(200).json(updatedContact);
   } catch (error) {
     if (error.code === 11000) {
-      return res.status(409).json({ error: 'Contact with this email already exists' });
+      return res.status(409).json({ error: 'Contact with this email already exists in your account' });
     }
     if (error.name === 'ValidationError') {
       return res.status(400).json({ error: error.message });
@@ -447,7 +471,7 @@ router.patch('/:id', async (req, res) => {
 
 /**
  * @route   DELETE /api/contacts/:id
- * @desc    Delete a contact by ID
+ * @desc    Delete a contact by ID scoped to user (404 if cross-user access)
  */
 router.delete('/:id', async (req, res) => {
   try {
@@ -457,7 +481,7 @@ router.delete('/:id', async (req, res) => {
       return res.status(400).json({ error: 'Invalid contact ID format' });
     }
 
-    const deletedContact = await Contact.findByIdAndDelete(id);
+    const deletedContact = await Contact.findOneAndDelete({ _id: id, user_id: req.user._id });
     if (!deletedContact) {
       return res.status(404).json({ error: 'Contact not found' });
     }

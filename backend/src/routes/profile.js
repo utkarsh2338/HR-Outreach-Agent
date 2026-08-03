@@ -6,8 +6,11 @@ import { fetchGithubProfile, fetchLinkedinProfile } from '../services/profileFet
 import { synthesizeUserProfile } from '../services/profileAnalysisService.js';
 import { generateFullPersonalizedEmail } from '../services/groqService.js';
 import { buildColdEmail } from '../templates/coldEmail.js';
+import { requireAuth } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
+
+router.use(requireAuth);
 
 // Multer memory storage configuration (10MB max file size)
 const upload = multer({
@@ -31,11 +34,11 @@ const upload = multer({
 
 /**
  * @route   GET /api/profile
- * @desc    Get current candidate profile & resume metadata
+ * @desc    Get candidate profile & resume metadata for logged-in user
  */
 router.get('/', async (req, res) => {
   try {
-    const profile = await UserProfile.getProfile();
+    const profile = await UserProfile.getProfile(req.user._id);
     return res.status(200).json({
       success: true,
       profile: {
@@ -60,7 +63,7 @@ router.get('/', async (req, res) => {
 
 /**
  * @route   POST /api/profile/upload-resume
- * @desc    Upload PDF/DOCX resume, parse plain text, and update profile
+ * @desc    Upload PDF/DOCX resume, parse plain text, and update profile for logged-in user
  */
 router.post('/upload-resume', (req, res) => {
   upload.single('resume')(req, res, async (err) => {
@@ -81,7 +84,7 @@ router.post('/upload-resume', (req, res) => {
       // Extract text from PDF / DOCX
       const extractedText = await parseResumeBuffer(buffer, mimetype, originalname);
 
-      const profile = await UserProfile.getProfile();
+      const profile = await UserProfile.getProfile(req.user._id);
       profile.resume_file_name = originalname;
       profile.resume_mime_type = mimetype;
       profile.resume_text = extractedText;
@@ -105,14 +108,14 @@ router.post('/upload-resume', (req, res) => {
 });
 
 /**
- * @route   POST /api/profile/urls
- * @desc    Update candidate's GitHub and LinkedIn URLs
+ * @route   POST /api/profile/links
+ * @desc    Update GitHub & LinkedIn URLs for logged-in user
  */
-router.post('/urls', async (req, res) => {
+router.post('/links', async (req, res) => {
   try {
     const { github_url, linkedin_url } = req.body;
 
-    const profile = await UserProfile.getProfile();
+    const profile = await UserProfile.getProfile(req.user._id);
     if (github_url !== undefined) profile.github_url = github_url.trim();
     if (linkedin_url !== undefined) profile.linkedin_url = linkedin_url.trim();
 
@@ -130,11 +133,11 @@ router.post('/urls', async (req, res) => {
 
 /**
  * @route   POST /api/profile/analyze
- * @desc    Triggers AI background analysis combining Resume + GitHub + LinkedIn
+ * @desc    Analyze uploaded resume + fetch GitHub/LinkedIn profile data + synthesize using Groq AI
  */
 router.post('/analyze', async (req, res) => {
   try {
-    const profile = await UserProfile.getProfile();
+    const profile = await UserProfile.getProfile(req.user._id);
 
     const resumeText = profile.resume_text || '';
     const githubUrl = profile.github_url || '';
@@ -142,7 +145,7 @@ router.post('/analyze', async (req, res) => {
 
     if (!resumeText && !githubUrl && !linkedinUrl) {
       return res.status(400).json({
-        error: 'Please upload a resume or provide at least one profile URL (GitHub/LinkedIn) before starting analysis.'
+        error: 'Please upload a resume or provide GitHub/LinkedIn URLs before running AI synthesis.'
       });
     }
 
@@ -182,13 +185,13 @@ router.post('/analyze', async (req, res) => {
 
 /**
  * @route   POST /api/profile/test-generate
- * @desc    Generate a test email draft live for preview
+ * @desc    Generate a test email draft live for preview for logged-in user
  */
 router.post('/test-generate', async (req, res) => {
   try {
     const { company = 'Stripe', role_title = 'Software Engineer', name = 'Hiring Manager', notes = '' } = req.body;
 
-    const profile = await UserProfile.getProfile();
+    const profile = await UserProfile.getProfile(req.user._id);
 
     let result = await generateFullPersonalizedEmail({
       userProfile: profile,
@@ -196,7 +199,7 @@ router.post('/test-generate', async (req, res) => {
     });
 
     if (!result) {
-      const fallback = buildColdEmail({ name, company, role_title });
+      const fallback = buildColdEmail({ name, company, role_title, candidate: profile });
       result = {
         subject: fallback.subject,
         textBody: fallback.textBody,

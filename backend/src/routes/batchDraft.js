@@ -1,13 +1,15 @@
 import express from 'express';
 import { runBatchDraftGeneration } from '../services/batchDraftService.js';
+import { requireAuth } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
 
+router.use(requireAuth);
+
 /**
  * @route   POST /api/contacts/batch-generate-drafts
- * @desc    Select up to N contacts with status "queued" or "new",
+ * @desc    Select up to N contacts for logged in user with status "queued" or "new",
  *          generate a personalized draft for each, store as draft_pending EmailLogs.
- *          Failures per-contact are reported but do not stop the batch.
  *
  * @body    { limit: number }  — defaults to 10, max 50
  */
@@ -17,7 +19,11 @@ router.post('/batch-generate-drafts', async (req, res) => {
   const delayMs = parseInt(process.env.GROQ_BATCH_DELAY_MS ?? '1500', 10);
 
   try {
-    const { drafted, failed } = await runBatchDraftGeneration({ limit, delayMs });
+    const { drafted, failed } = await runBatchDraftGeneration({
+      userId: req.user._id,
+      limit,
+      delayMs
+    });
 
     if (drafted.length === 0 && failed.length === 0) {
       return res.status(200).json({

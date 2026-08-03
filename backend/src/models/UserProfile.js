@@ -2,6 +2,13 @@ import mongoose from 'mongoose';
 
 const userProfileSchema = new mongoose.Schema(
   {
+    user_id: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      required: true,
+      unique: true,
+      index: true
+    },
     resume_file_name: {
       type: String
     },
@@ -72,12 +79,13 @@ const userProfileSchema = new mongoose.Schema(
 );
 
 /**
- * Returns the singleton UserProfile instance (or creates default if missing)
+ * Returns the UserProfile instance for a specific user (or creates default if missing)
  */
-userProfileSchema.statics.getProfile = async function () {
-  let profile = await this.findOne();
+userProfileSchema.statics.getProfile = async function (userId) {
+  if (!userId) throw new Error('userId is required for getProfile');
+  let profile = await this.findOne({ user_id: userId });
   if (!profile) {
-    profile = await this.create({});
+    profile = await this.create({ user_id: userId });
   }
   return profile;
 };

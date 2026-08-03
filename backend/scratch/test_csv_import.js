@@ -1,10 +1,12 @@
 import express from 'express';
 import contactsRouter from '../src/routes/contacts.js';
 import Contact from '../src/models/Contact.js';
+import User from '../src/models/User.js';
 import mongoose from 'mongoose';
 import dotenv from 'dotenv';
 import fs from 'fs';
 import path from 'path';
+import { generateToken } from '../src/middleware/authMiddleware.js';
 
 dotenv.config();
 
@@ -21,8 +23,21 @@ async function runCsvTest() {
   console.log('Connecting to MongoDB...');
   await mongoose.connect(process.env.MONGODB_URI);
 
+  let testUser = await User.findOne({ email: 'utkarshshukla1007@gmail.com' });
+  if (!testUser) {
+    testUser = await User.create({
+      name: 'Utkarsh Shukla',
+      email: 'utkarshshukla1007@gmail.com',
+      google_id: 'test_legacy_google_id_001'
+    });
+  }
+
+  const token = generateToken(testUser);
+  const authHeader = { 'Authorization': `Bearer ${token}` };
+
   // Clean up any old test contacts from previous runs
   await Contact.deleteMany({
+    user_id: testUser._id,
     email: {
       $in: [
         'sarah.j@alpha-tech.com',
@@ -48,6 +63,7 @@ async function runCsvTest() {
 
       const res = await fetch('http://localhost:5098/api/contacts/import-csv', {
         method: 'POST',
+        headers: authHeader,
         body: formData
       });
 
@@ -58,6 +74,7 @@ async function runCsvTest() {
       // Test re-importing the same CSV to verify deduplication
       const resDup = await fetch('http://localhost:5098/api/contacts/import-csv', {
         method: 'POST',
+        headers: authHeader,
         body: formData
       });
       const dataDup = await resDup.json();
@@ -65,6 +82,7 @@ async function runCsvTest() {
 
       // Clean up imported test contacts
       await Contact.deleteMany({
+        user_id: testUser._id,
         email: {
           $in: [
             'sarah.j@alpha-tech.com',

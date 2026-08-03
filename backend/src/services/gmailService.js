@@ -1,21 +1,24 @@
 import { google } from 'googleapis';
 
-const getGmailClient = () => {
-  const { GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, GMAIL_REFRESH_TOKEN } = process.env;
+export const getGmailClient = (user) => {
+  const { GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET } = process.env;
+  const refreshToken = user?.google_refresh_token || process.env.GMAIL_REFRESH_TOKEN;
 
-  if (!GMAIL_CLIENT_ID || !GMAIL_CLIENT_SECRET || !GMAIL_REFRESH_TOKEN) {
+  if (!GMAIL_CLIENT_ID || !GMAIL_CLIENT_SECRET || !refreshToken) {
     throw new Error(
-      'Gmail OAuth2 credentials are missing. Ensure GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, and GMAIL_REFRESH_TOKEN are set in .env'
+      'Gmail OAuth2 credentials are missing. Ensure GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, and user refresh token are set.'
     );
   }
+
+  const redirectUri = process.env.GOOGLE_CALLBACK_URL || 'http://localhost:5000/api/auth/google/callback';
 
   const oauth2Client = new google.auth.OAuth2(
     GMAIL_CLIENT_ID,
     GMAIL_CLIENT_SECRET,
-    'https://developers.google.com/oauthplayground' // Redirect URI used when generating the refresh token
+    redirectUri
   );
 
-  oauth2Client.setCredentials({ refresh_token: GMAIL_REFRESH_TOKEN });
+  oauth2Client.setCredentials({ refresh_token: refreshToken });
 
   return google.gmail({ version: 'v1', auth: oauth2Client });
 };
@@ -52,17 +55,18 @@ const buildRawMessage = ({ to, subject, htmlBody, textBody }) => {
 };
 
 /**
- * Sends an email via the Gmail API.
+ * Sends an email via the Gmail API for a specific user.
  *
  * @param {object} options
  * @param {string} options.to       - Recipient email address
  * @param {string} options.subject  - Email subject line
  * @param {string} options.htmlBody - HTML body content
  * @param {string} options.textBody - Plain-text body content (fallback)
+ * @param {object} [options.user]   - User object for refresh token
  * @returns {Promise<{ gmail_message_id: string, gmail_thread_id: string }>}
  */
-export const sendEmail = async ({ to, subject, htmlBody, textBody }) => {
-  const gmail = getGmailClient();
+export const sendEmail = async ({ to, subject, htmlBody, textBody, user }) => {
+  const gmail = getGmailClient(user);
 
   const raw = buildRawMessage({ to, subject, htmlBody, textBody });
 

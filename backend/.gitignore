@@ -1,3 +1,21 @@
+# Dependencies
 node_modules
+
+# Local Data Storage
+data/
+data/*
+!data/.gitkeep
+sent_contacts.csv
+
+# Environment variables
 .env
+.env.*
+!.env.example
+
+# Builds & Logs
 dist
+*.log
+logs
+
+# OS
+.DS_Store

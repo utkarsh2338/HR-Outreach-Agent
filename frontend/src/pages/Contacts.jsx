@@ -1,23 +1,26 @@
 import { useState } from 'react';
-import { RiSearchLine, RiFilterLine } from 'react-icons/ri';
+import { useNavigate } from 'react-router-dom';
+import { RiSearchLine, RiFilterLine, RiSparklingLine, RiMailSendLine } from 'react-icons/ri';
 import { AppLayout, PageHeader } from '../components/layout/AppLayout.jsx';
 import { ContactsTable } from '../components/tables/ContactsTable.jsx';
 import { Pagination } from '../components/common/Pagination.jsx';
+import { Button } from '../components/common/Button.jsx';
 import { useContacts } from '../hooks/useContacts.js';
 import { useDebounce } from '../hooks/useDebounce.js';
+import { generateSelectedDrafts } from '../api/contacts.js';
 
 const STATUS_FILTER_OPTIONS = [
-  { value: '',               label: 'All Statuses' },
-  { value: 'new',            label: 'New' },
-  { value: 'queued',         label: 'Queued' },
-  { value: 'draft_pending',  label: 'Draft Pending' },
-  { value: 'sent',           label: 'Sent' },
-  { value: 'opened',         label: 'Opened' },
-  { value: 'replied',        label: 'Replied' },
-  { value: 'interested',     label: 'Interested' },
+  { value: '', label: 'All Statuses' },
+  { value: 'new', label: 'New' },
+  { value: 'queued', label: 'Queued' },
+  { value: 'draft_pending', label: 'Draft Pending' },
+  { value: 'sent', label: 'Sent' },
+  { value: 'opened', label: 'Opened' },
+  { value: 'replied', label: 'Replied' },
+  { value: 'interested', label: 'Interested' },
   { value: 'not_interested', label: 'Not Interested' },
-  { value: 'no_response',    label: 'No Response' },
-  { value: 'closed',         label: 'Closed' },
+  { value: 'no_response', label: 'No Response' },
+  { value: 'closed', label: 'Closed' },
 ];
 
 const PAGE_LIMIT = 25;
@@ -32,7 +35,7 @@ const FilterBar = ({ search, onSearch, status, onStatus }) => (
       />
       <input
         type="search"
-        placeholder="Search contacts..."
+        placeholder="Search HRs by name, company, email..."
         value={search}
         onChange={(e) => onSearch(e.target.value)}
         aria-label="Search contacts"
@@ -58,15 +61,19 @@ const FilterBar = ({ search, onSearch, status, onStatus }) => (
 );
 
 const Contacts = () => {
+  const navigate = useNavigate();
   const [searchInput, setSearchInput] = useState('');
   const [status, setStatus] = useState('');
   const [page, setPage] = useState(1);
 
+  // Checkbox selection state
+  const [selectedIds, setSelectedIds] = useState([]);
+  const [isGenerating, setIsGenerating] = useState(false);
+
   const search = useDebounce(searchInput, 350);
 
-  // Reset to page 1 when filters change
-  const handleSearch = (val) => { setSearchInput(val); setPage(1); };
-  const handleStatus = (val) => { setStatus(val); setPage(1); };
+  const handleSearch = (val) => { setSearchInput(val); setPage(1); setSelectedIds([]); };
+  const handleStatus = (val) => { setStatus(val); setPage(1); setSelectedIds([]); };
 
   const filters = {
     ...(search && { search }),
@@ -77,14 +84,72 @@ const Contacts = () => {
 
   const { data, isLoading, isError, refetch } = useContacts(filters);
 
+  const contacts = data?.contacts ?? [];
+
+  const handleToggleCheck = (id) => {
+    setSelectedIds((prev) =>
+      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
+    );
+  };
+
+  const handleToggleSelectAll = (currentPageIds) => {
+    if (selectedIds.length === currentPageIds.length) {
+      setSelectedIds([]);
+    } else {
+      setSelectedIds(currentPageIds);
+    }
+  };
+
+  const handleGenerateDrafts = async () => {
+    const idsToProcess = selectedIds.length > 0 ? selectedIds : contacts.map((c) => c._id);
+    const count = idsToProcess.length;
+
+    if (count === 0) {
+      window.alert('No HR contacts available on this page.');
+      return;
+    }
+
+    if (!window.confirm(`Generate cold email drafts for ${count} HR contact${count !== 1 ? 's' : ''} now?`)) {
+      return;
+    }
+
+    setIsGenerating(true);
+    try {
+      const res = await generateSelectedDrafts(idsToProcess);
+      window.alert(res.message || `Successfully generated ${res.drafted} draft(s)! Redirecting to Pending Drafts...`);
+      setSelectedIds([]);
+      navigate('/pending');
+    } catch (err) {
+      window.alert(`Failed to generate drafts: ${err.message}`);
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
   return (
     <AppLayout>
       <PageHeader
-        title="Contacts"
+        title="HR Contacts List"
         description={
           data?.total !== undefined
-            ? `${data.total.toLocaleString()} contact${data.total !== 1 ? 's' : ''}`
-            : 'Your outreach contact list.'
+            ? `${data.total.toLocaleString()} HR contact${data.total !== 1 ? 's' : ''} loaded from local storage`
+            : 'Review HR names, company details, and job titles.'
+        }
+        actions={
+          <div className="flex items-center gap-2">
+            <Button
+              variant="primary"
+              size="sm"
+              loading={isGenerating}
+              disabled={isGenerating || contacts.length === 0}
+              onClick={handleGenerateDrafts}
+            >
+              <RiSparklingLine className="w-4 h-4" />
+              {selectedIds.length > 0
+                ? `Generate Draft for Selected HRs (${selectedIds.length})`
+                : `Generate Draft for All HRs (${contacts.length})`}
+            </Button>
+          </div>
         }
       />
 
@@ -101,16 +166,19 @@ const Contacts = () => {
             data={data}
             isLoading={isLoading}
             isError={isError}
+            selectedIds={selectedIds}
+            onToggleCheck={handleToggleCheck}
+            onToggleSelectAll={handleToggleSelectAll}
           />
         </div>
 
-        {data && (
+        {data && data.totalPages > 1 && (
           <Pagination
             page={data.page}
             limit={data.limit}
             total={data.total}
             totalPages={data.totalPages}
-            onPageChange={setPage}
+            onPageChange={(p) => { setPage(p); setSelectedIds([]); }}
           />
         )}
       </div>

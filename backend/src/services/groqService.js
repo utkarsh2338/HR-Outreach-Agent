@@ -204,9 +204,11 @@ export const generateFullPersonalizedEmail = async ({ userProfile, contact }) =>
   }
 
   const profile = userProfile?.parsed_profile || {};
-  const candidateName = profile.name || 'Applicant';
-  const githubUrl = userProfile?.github_url || profile.github_url || '';
-  const linkedinUrl = userProfile?.linkedin_url || profile.linkedin_url || '';
+  const candidateName = profile.name || 'Tanish Patidar';
+  const githubUrl = userProfile?.github_url || profile.github_url || 'https://github.com/TechTAnish-07';
+  const linkedinUrl = userProfile?.linkedin_url || profile.linkedin_url || 'https://www.linkedin.com/in/tanish07patidar-/';
+  const portfolioUrl = userProfile?.portfolio_url || profile.portfolio_url || '';
+  const resumeUrl = userProfile?.resume_url || profile.resume_url || '';
 
   const systemPrompt = `You are an expert executive email writer crafting a highly personalized, high-converting cold email for a software developer candidate.
 
@@ -215,10 +217,11 @@ RULES:
 2. DO NOT use generic phrases like "I hope this email finds you well", "I stumbled upon", "I am thrilled", "I am writing to express my enthusiasm", or corporate jargon.
 3. Tailor the email directly using the candidate's actual projects, achievements, and skills from their background.
 4. Do NOT invent facts about the recipient's company (funding, initiatives, team size, products). Keep the email concise and focused on genuine candidate-role fit.
-5. Output JSON ONLY matching this exact format with NO markdown wrapping:
+5. In the email signature, ALWAYS output full, complete URLs for candidate links so they are automatically clickable (e.g. LinkedIn: ${linkedinUrl} | GitHub: ${githubUrl}).
+6. Output JSON ONLY matching this exact format with NO markdown wrapping:
 {
   "subject": "Compelling subject line mentioning role/company and key strength or candidate name",
-  "textBody": "Full plain text email body including greeting, tailored hook, background highlights (bullet points or short paragraphs), call to action, and signature"
+  "textBody": "Full plain text email body including greeting, tailored hook, background highlights (bullet points or short paragraphs), call to action, and signature with full URLs"
 }`;
 
   const userPrompt = `CANDIDATE BACKGROUND:
@@ -231,6 +234,8 @@ Education: ${JSON.stringify(profile.education || [])}
 Achievements: ${Array.isArray(profile.achievements) ? profile.achievements.join('; ') : ''}
 GitHub: ${githubUrl}
 LinkedIn: ${linkedinUrl}
+Portfolio: ${portfolioUrl}
+Resume Link: ${resumeUrl}
 
 RECIPIENT / TARGET:
 Recruiter Name: ${recruiterName || 'HR / Talent Team'}

@@ -10,7 +10,7 @@ export const getGmailClient = (user) => {
     );
   }
 
-  const redirectUri = process.env.GOOGLE_CALLBACK_URL || 'http://localhost:5000/api/auth/google/callback';
+  const redirectUri = process.env.GOOGLE_CALLBACK_URL || 'http://localhost:5001/api/auth/google/callback';
 
   const oauth2Client = new google.auth.OAuth2(
     GMAIL_CLIENT_ID,
@@ -28,10 +28,15 @@ export const getGmailClient = (user) => {
  */
 const buildRawMessage = ({ to, subject, htmlBody, textBody }) => {
   const boundary = `----=_Part_${Date.now()}`;
+
+  // Sanitize subject header to clean ASCII to prevent UTF-8 double-encoding corruption in Gmail headers
+  const safeSubject = (subject || '').replace(/[^\x00-\x7F]/g, '-');
+  const encodedSubject = `=?UTF-8?B?${Buffer.from(safeSubject, 'utf-8').toString('base64')}?=`;
+
   const lines = [
     `To: ${to}`,
     'From: me',
-    `Subject: ${subject}`,
+    `Subject: ${encodedSubject}`,
     'MIME-Version: 1.0',
     `Content-Type: multipart/alternative; boundary="${boundary}"`,
     '',

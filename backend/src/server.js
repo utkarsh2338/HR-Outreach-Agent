@@ -15,12 +15,29 @@ import { registerUserAgentCron } from './jobs/userAgentCron.js';
 dotenv.config();
 
 const app = express();
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 5001;
 
 // Middleware
+const allowedOrigins = [
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+  'http://localhost:5174',
+  'http://127.0.0.1:5174',
+  process.env.FRONTEND_URL
+].filter(Boolean);
+
 app.use(
   cors({
-    origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+    origin: (origin, callback) => {
+      if (!origin) return callback(null, true);
+      if (
+        allowedOrigins.includes(origin) ||
+        /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)
+      ) {
+        return callback(null, true);
+      }
+      return callback(null, true);
+    },
     credentials: true
   })
 );
@@ -60,12 +77,10 @@ app.use((req, res) => {
 
 // Start Server
 const startServer = async () => {
-  await connectDB();
-
   app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
+    console.log(`HR Outreach Agent Local Server running on port ${PORT}`);
+    console.log(`Local Storage Mode Active (Data files in backend/data/ & CSV trimming enabled)`);
 
-    // Register cron jobs only when explicitly enabled
     if (process.env.ENABLE_CRON === 'true') {
       console.log('[cron] ENABLE_CRON=true — registering unified agent job...');
       registerUserAgentCron();

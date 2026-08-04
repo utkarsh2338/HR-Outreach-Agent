@@ -1,6 +1,6 @@
 import { api } from './client.js';
 
-const BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000';
+const BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5001';
 
 export const getProfile = () => api.get('/api/profile');
 
@@ -16,6 +16,7 @@ export const uploadResume = async (file) => {
 
   const res = await fetch(`${BASE_URL}/api/profile/upload-resume`, {
     method: 'POST',
+    credentials: 'include',
     body: formData,
   });
 

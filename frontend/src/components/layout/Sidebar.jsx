@@ -121,7 +121,7 @@ export const Sidebar = () => {
       {/* Footer: API status */}
       <div className="px-4 py-3 border-t border-gray-200 shrink-0">
         <p className="text-2xs text-gray-400 truncate">
-          {import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000'}
+          {import.meta.env.VITE_API_BASE_URL || 'http://localhost:5001'}
         </p>
       </div>
     </aside>

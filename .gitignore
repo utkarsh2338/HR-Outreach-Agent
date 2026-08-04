@@ -2,6 +2,28 @@
 node_modules
 **/node_modules
 
+# Local Data Storage & User Files (Profiles, Logs, Trimmed CSVs)
+data/
+backend/data/
+backend/data/*
+!backend/data/.gitkeep
+*.json
+!package.json
+!package-lock.json
+!tsconfig.json
+!**/package.json
+!**/package-lock.json
+!**/user_profile.json.example
+
+# CSV & Data Exports
+sent_contacts.csv
+backend/data/sent_contacts.csv
+*.csv.bak
+uploads/
+**/uploads/
+temp/
+**/temp/
+
 # Environment variables
 .env
 .env.*

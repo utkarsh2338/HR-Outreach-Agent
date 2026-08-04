@@ -1,6 +1,6 @@
 import express from 'express';
 import multer from 'multer';
-import UserProfile from '../models/UserProfile.js';
+import { fileDb } from '../utils/fileDb.js';
 import { parseResumeBuffer } from '../services/resumeParserService.js';
 import { fetchGithubProfile, fetchLinkedinProfile } from '../services/profileFetcherService.js';
 import { synthesizeUserProfile } from '../services/profileAnalysisService.js';
@@ -12,7 +12,6 @@ const router = express.Router();
 
 router.use(requireAuth);
 
-// Multer memory storage configuration (10MB max file size)
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 },
@@ -34,26 +33,28 @@ const upload = multer({
 
 /**
  * @route   GET /api/profile
- * @desc    Get candidate profile & resume metadata for logged-in user
+ * @desc    Get candidate profile & resume metadata from local fileDb
  */
 router.get('/', async (req, res) => {
   try {
-    const profile = await UserProfile.getProfile(req.user._id);
+    const profile = fileDb.getProfile();
     return res.status(200).json({
       success: true,
       profile: {
-        id: profile._id,
+        id: profile.id || 'local_user_1',
         resume_file_name: profile.resume_file_name || null,
         resume_mime_type: profile.resume_mime_type || null,
         has_resume: Boolean(profile.resume_text),
         resume_text_length: profile.resume_text ? profile.resume_text.length : 0,
         github_url: profile.github_url || '',
         linkedin_url: profile.linkedin_url || '',
+        portfolio_url: profile.portfolio_url || '',
+        resume_url: profile.resume_url || '',
         parsed_profile: profile.parsed_profile || null,
         raw_github_data: profile.raw_github_data || null,
         raw_linkedin_data: profile.raw_linkedin_data || null,
         last_analyzed_at: profile.last_analyzed_at || null,
-        updated_at: profile.updatedAt
+        updated_at: profile.updatedAt || new Date().toISOString()
       }
     });
   } catch (err) {
@@ -63,7 +64,7 @@ router.get('/', async (req, res) => {
 
 /**
  * @route   POST /api/profile/upload-resume
- * @desc    Upload PDF/DOCX resume, parse plain text, and update profile for logged-in user
+ * @desc    Upload PDF/DOCX resume, parse plain text, and update profile
  */
 router.post('/upload-resume', (req, res) => {
   upload.single('resume')(req, res, async (err) => {
@@ -81,15 +82,13 @@ router.post('/upload-resume', (req, res) => {
     try {
       const { buffer, mimetype, originalname } = req.file;
 
-      // Extract text from PDF / DOCX
       const extractedText = await parseResumeBuffer(buffer, mimetype, originalname);
 
-      const profile = await UserProfile.getProfile(req.user._id);
-      profile.resume_file_name = originalname;
-      profile.resume_mime_type = mimetype;
-      profile.resume_text = extractedText;
-
-      await profile.save();
+      const profile = fileDb.saveProfile({
+        resume_file_name: originalname,
+        resume_mime_type: mimetype,
+        resume_text: extractedText
+      });
 
       return res.status(200).json({
         message: 'Resume uploaded and parsed successfully!',
@@ -108,28 +107,35 @@ router.post('/upload-resume', (req, res) => {
 });
 
 /**
- * @route   POST /api/profile/links
- * @desc    Update GitHub & LinkedIn URLs for logged-in user
+ * @route   POST /api/profile/urls (and legacy /links)
+ * @desc    Update GitHub, LinkedIn, Portfolio, and Resume PDF links
  */
-router.post('/links', async (req, res) => {
+const handleSaveUrls = async (req, res) => {
   try {
-    const { github_url, linkedin_url } = req.body;
+    const { github_url, linkedin_url, portfolio_url, resume_url } = req.body;
 
-    const profile = await UserProfile.getProfile(req.user._id);
-    if (github_url !== undefined) profile.github_url = github_url.trim();
-    if (linkedin_url !== undefined) profile.linkedin_url = linkedin_url.trim();
+    const updates = {};
+    if (github_url !== undefined) updates.github_url = github_url.trim();
+    if (linkedin_url !== undefined) updates.linkedin_url = linkedin_url.trim();
+    if (portfolio_url !== undefined) updates.portfolio_url = portfolio_url.trim();
+    if (resume_url !== undefined) updates.resume_url = resume_url.trim();
 
-    await profile.save();
+    const profile = fileDb.saveProfile(updates);
 
     return res.status(200).json({
-      message: 'Profile URLs updated successfully',
+      message: 'Profile links updated successfully',
       github_url: profile.github_url,
-      linkedin_url: profile.linkedin_url
+      linkedin_url: profile.linkedin_url,
+      portfolio_url: profile.portfolio_url,
+      resume_url: profile.resume_url
     });
   } catch (err) {
     return res.status(500).json({ error: 'Failed to update profile URLs', details: err.message });
   }
-});
+};
+
+router.post('/urls', handleSaveUrls);
+router.post('/links', handleSaveUrls);
 
 /**
  * @route   POST /api/profile/analyze
@@ -137,7 +143,7 @@ router.post('/links', async (req, res) => {
  */
 router.post('/analyze', async (req, res) => {
   try {
-    const profile = await UserProfile.getProfile(req.user._id);
+    const profile = fileDb.getProfile();
 
     const resumeText = profile.resume_text || '';
     const githubUrl = profile.github_url || '';
@@ -149,31 +155,28 @@ router.post('/analyze', async (req, res) => {
       });
     }
 
-    // 1. Fetch public profile data concurrently
     const [githubData, linkedinData] = await Promise.all([
       githubUrl ? fetchGithubProfile(githubUrl) : Promise.resolve(null),
       linkedinUrl ? fetchLinkedinProfile(linkedinUrl) : Promise.resolve(null)
     ]);
 
-    // 2. Synthesize using Groq LLM
     const parsedProfile = await synthesizeUserProfile({
       resumeText,
       githubData,
       linkedinData
     });
 
-    // 3. Save results to UserProfile
-    profile.raw_github_data = githubData;
-    profile.raw_linkedin_data = linkedinData;
-    profile.parsed_profile = parsedProfile;
-    profile.last_analyzed_at = new Date();
-
-    await profile.save();
+    const updated = fileDb.saveProfile({
+      raw_github_data: githubData,
+      raw_linkedin_data: linkedinData,
+      parsed_profile: parsedProfile,
+      last_analyzed_at: new Date().toISOString()
+    });
 
     return res.status(200).json({
       message: 'Candidate profile analyzed and synthesized successfully!',
       parsed_profile: parsedProfile,
-      last_analyzed_at: profile.last_analyzed_at
+      last_analyzed_at: updated.last_analyzed_at
     });
   } catch (err) {
     return res.status(500).json({
@@ -185,13 +188,13 @@ router.post('/analyze', async (req, res) => {
 
 /**
  * @route   POST /api/profile/test-generate
- * @desc    Generate a test email draft live for preview for logged-in user
+ * @desc    Generate a test email draft live for preview
  */
 router.post('/test-generate', async (req, res) => {
   try {
     const { company = 'Stripe', role_title = 'Software Engineer', name = 'Hiring Manager', notes = '' } = req.body;
 
-    const profile = await UserProfile.getProfile(req.user._id);
+    const profile = fileDb.getProfile();
 
     let result = await generateFullPersonalizedEmail({
       userProfile: profile,

@@ -8,7 +8,7 @@ const router = express.Router();
 const getOAuth2Client = (redirectUri) => {
   const clientId = process.env.GMAIL_CLIENT_ID;
   const clientSecret = process.env.GMAIL_CLIENT_SECRET;
-  const callbackUrl = redirectUri || process.env.GOOGLE_CALLBACK_URL || 'http://localhost:5000/api/auth/google/callback';
+  const callbackUrl = redirectUri || process.env.GOOGLE_CALLBACK_URL || 'http://localhost:5001/api/auth/google/callback';
 
   return new google.auth.OAuth2(clientId, clientSecret, callbackUrl);
 };

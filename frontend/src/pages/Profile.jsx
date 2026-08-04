@@ -40,6 +40,8 @@ export const Profile = () => {
   // Form states
   const [githubUrl, setGithubUrl] = useState('');
   const [linkedinUrl, setLinkedinUrl] = useState('');
+  const [portfolioUrl, setPortfolioUrl] = useState('');
+  const [resumeUrl, setResumeUrl] = useState('');
   const [dragActive, setDragActive] = useState(false);
   const [statusMessage, setStatusMessage] = useState(null); // { type: 'success'|'error', text: '' }
 
@@ -54,6 +56,18 @@ export const Profile = () => {
     if (profile) {
       setGithubUrl(profile.github_url || '');
       setLinkedinUrl(profile.linkedin_url || '');
+      setPortfolioUrl(profile.portfolio_url || '');
+      setResumeUrl(profile.resume_url || '');
+
+      if (profile.parsed_profile) {
+        try {
+          localStorage.setItem('hr_agent_parsed_profile', JSON.stringify(profile.parsed_profile));
+          localStorage.setItem('hr_agent_resume_info', JSON.stringify({
+            file_name: profile.resume_file_name,
+            last_analyzed: profile.last_analyzed_at
+          }));
+        } catch (_) {}
+      }
     }
   }, [profile]);
 
@@ -61,8 +75,13 @@ export const Profile = () => {
     e.preventDefault();
     setStatusMessage(null);
     try {
-      await updateUrlsMutation.mutateAsync({ github_url: githubUrl, linkedin_url: linkedinUrl });
-      setStatusMessage({ type: 'success', text: 'GitHub and LinkedIn profile URLs saved successfully!' });
+      await updateUrlsMutation.mutateAsync({
+        github_url: githubUrl,
+        linkedin_url: linkedinUrl,
+        portfolio_url: portfolioUrl,
+        resume_url: resumeUrl
+      });
+      setStatusMessage({ type: 'success', text: 'Profile, Portfolio, and Resume links saved successfully!' });
     } catch (err) {
       setStatusMessage({ type: 'error', text: err.message || 'Failed to save profile URLs.' });
     }
@@ -291,6 +310,34 @@ export const Profile = () => {
                     value={linkedinUrl}
                     onChange={(e) => setLinkedinUrl(e.target.value)}
                     placeholder="https://www.linkedin.com/in/username"
+                    className="w-full px-3 py-1.5 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1 flex items-center gap-1.5">
+                    <RiLinksLine className="w-3.5 h-3.5 text-emerald-600" />
+                    Portfolio Website Link
+                  </label>
+                  <input
+                    type="url"
+                    value={portfolioUrl}
+                    onChange={(e) => setPortfolioUrl(e.target.value)}
+                    placeholder="https://yourportfolio.com"
+                    className="w-full px-3 py-1.5 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1 flex items-center gap-1.5">
+                    <RiFileTextLine className="w-3.5 h-3.5 text-amber-600" />
+                    Hosted Resume PDF Link (Google Drive / Cloud)
+                  </label>
+                  <input
+                    type="url"
+                    value={resumeUrl}
+                    onChange={(e) => setResumeUrl(e.target.value)}
+                    placeholder="https://drive.google.com/file/d/your-resume-link"
                     className="w-full px-3 py-1.5 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500"
                   />
                 </div>

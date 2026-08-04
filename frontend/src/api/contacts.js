@@ -21,3 +21,7 @@ export const generateDraft = (id) => api.post(`/api/contacts/${id}/generate-draf
 /** @returns {Promise<object>} */
 export const batchGenerateDrafts = (limit = 10) =>
   api.post('/api/contacts/batch-generate-drafts', { limit });
+
+/** @returns {Promise<object>} */
+export const generateSelectedDrafts = (contactIds) =>
+  api.post('/api/contacts/generate-selected-drafts', { contact_ids: contactIds });

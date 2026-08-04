@@ -11,7 +11,10 @@ export const updateDraft = (draftId, data) =>
 export const approveDraft = (draftId, data) =>
   api.post(`/api/email-logs/${draftId}/approve-and-send`, data);
 
+/** @returns {Promise<object>} Approve and send multiple drafts in batch */
+export const approveBatchDrafts = (draftIds) =>
+  api.post('/api/email-logs/approve-batch', { draft_ids: draftIds });
+
 /** @returns {Promise<object>} Discard a pending draft */
 export const discardDraft = (draftId) =>
   api.patch(`/api/email-logs/${draftId}/discard`);
-

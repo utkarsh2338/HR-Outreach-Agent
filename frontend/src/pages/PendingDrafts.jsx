@@ -11,6 +11,7 @@ import {
   RiEditLine,
   RiEyeLine,
   RiSave3Line,
+  RiCheckboxMultipleLine
 } from 'react-icons/ri';
 import { AppLayout, PageHeader } from '../components/layout/AppLayout.jsx';
 import { Pagination } from '../components/common/Pagination.jsx';
@@ -22,6 +23,7 @@ import { TableSkeleton } from '../components/common/Skeleton.jsx';
 import { usePendingDrafts, useApproveDraft, useDiscardDraft, useUpdateDraft } from '../hooks/useEmailLogs.js';
 import { relativeTime, truncate } from '../utils/format.js';
 import { batchGenerateDrafts } from '../api/contacts.js';
+import { approveBatchDrafts } from '../api/emailLogs.js';
 
 const PAGE_LIMIT = 20;
 
@@ -45,21 +47,19 @@ const DraftDrawer = ({
 
   const [subject, setSubject] = useState(draft?.subject ?? '');
   const [body, setBody] = useState(draft?.body ?? '');
-  const [activeTab, setActiveTab] = useState('edit'); // 'edit' | 'preview'
+  const [activeTab, setActiveTab] = useState('edit');
 
   useEffect(() => {
     setSubject(draft?.subject ?? '');
     setBody(draft?.body ?? '');
   }, [draft]);
 
-  // Close on Escape key
   useEffect(() => {
     const handler = (e) => { if (e.key === 'Escape') onClose(); };
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
   }, [onClose]);
 
-  // Trap focus inside drawer
   useEffect(() => {
     drawerRef.current?.focus();
   }, []);
@@ -76,21 +76,50 @@ const DraftDrawer = ({
     onApprove(draft.draft_id, hasChanges ? { subject, body } : undefined);
   };
 
-  // Convert plain text body to simple formatted HTML for preview tab if edited
-  const previewHtml = hasChanges
+  const autoLinkText = (str) => {
+    if (!str) return '';
+    let html = str;
+
+    html = html.replace(
+      /LinkedIn:\s*(https?:\/\/[^\s<"']+)/gi,
+      (match, url) => `<a href="${url.replace(/[.,;)]+$/, '')}" target="_blank" rel="noopener noreferrer" style="color: #2563eb; text-decoration: underline; font-weight: 600;">LinkedIn</a>`
+    );
+    html = html.replace(
+      /GitHub:\s*(https?:\/\/[^\s<"']+)/gi,
+      (match, url) => `<a href="${url.replace(/[.,;)]+$/, '')}" target="_blank" rel="noopener noreferrer" style="color: #2563eb; text-decoration: underline; font-weight: 600;">GitHub</a>`
+    );
+    html = html.replace(
+      /Portfolio:\s*(https?:\/\/[^\s<"']+)/gi,
+      (match, url) => `<a href="${url.replace(/[.,;)]+$/, '')}" target="_blank" rel="noopener noreferrer" style="color: #2563eb; text-decoration: underline; font-weight: 600;">Portfolio</a>`
+    );
+    html = html.replace(
+      /Resume PDF:\s*(https?:\/\/[^\s<"']+)/gi,
+      (match, url) => `<a href="${url.replace(/[.,;)]+$/, '')}" target="_blank" rel="noopener noreferrer" style="color: #2563eb; text-decoration: underline; font-weight: 600;">Resume PDF</a>`
+    );
+
+    const urlRegex = /(https?:\/\/[^\s<"']+)/g;
+    html = html.replace(urlRegex, (url) => {
+      const clean = url.replace(/[.,;)]+$/, '');
+      return `<a href="${clean}" target="_blank" rel="noopener noreferrer" style="color: #2563eb; text-decoration: underline; font-weight: 600;">${clean}</a>`;
+    });
+
+    return html;
+  };
+
+  const rawContent = hasChanges
     ? body.replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>')
     : (draft.html_body || body.replace(/\n/g, '<br>'));
 
+  const previewHtml = autoLinkText(rawContent);
+
   return (
     <>
-      {/* Backdrop */}
       <div
         className="fixed inset-0 bg-black/30 z-40 backdrop-blur-sm"
         onClick={onClose}
         aria-hidden="true"
       />
 
-      {/* Drawer panel */}
       <aside
         ref={drawerRef}
         tabIndex={-1}
@@ -98,51 +127,32 @@ const DraftDrawer = ({
         aria-modal="true"
         aria-label={`Edit email draft for ${contact?.name ?? 'contact'}`}
         className="fixed right-0 top-0 h-full w-full max-w-2xl z-50 flex flex-col bg-white shadow-2xl outline-none"
-        style={{ animation: 'slideInRight 0.22s cubic-bezier(.4,0,.2,1)' }}
       >
-        {/* Header */}
-        <div className="flex items-start justify-between px-6 pt-5 pb-3 border-b border-gray-200 shrink-0 bg-gray-50/50">
-          <div className="min-w-0 pr-4">
-            <div className="flex items-center gap-2">
-              <h2 className="text-base font-semibold text-gray-900 truncate">
-                Edit & Review Draft
-              </h2>
-              <LLMBadge llmGenerated={draft.llm_generated} />
-              {hasChanges && (
-                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200">
-                  Unsaved Edits
-                </span>
-              )}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 bg-gray-50/80 shrink-0">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-full bg-indigo-100 flex items-center justify-center shrink-0">
+              <RiUser3Line className="w-5 h-5 text-indigo-600" />
             </div>
-
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-2">
-              <span className="flex items-center gap-1 text-xs text-gray-600">
-                <RiUser3Line className="w-3.5 h-3.5 shrink-0 text-gray-400" />
-                <strong>To:</strong> {contact?.name ?? '—'}
-              </span>
-              <span className="flex items-center gap-1 text-xs text-gray-600">
-                <RiBuildingLine className="w-3.5 h-3.5 shrink-0 text-gray-400" />
-                {contact?.company ?? '—'}
-              </span>
-              <span className="flex items-center gap-1 text-xs text-gray-600">
-                <RiMailSendLine className="w-3.5 h-3.5 shrink-0 text-gray-400" />
-                {contact?.email ?? '—'}
-              </span>
+            <div>
+              <h2 className="text-base font-bold text-gray-900 leading-tight">
+                {contact?.name ?? 'Recruiter'}
+              </h2>
+              <p className="text-xs text-gray-500 flex items-center gap-1.5 mt-0.5">
+                <RiBuildingLine className="w-3.5 h-3.5" />
+                {contact?.company ?? 'Company'} &bull; {contact?.email ?? ''}
+              </p>
             </div>
           </div>
-
           <button
             onClick={onClose}
-            className="shrink-0 p-1 rounded text-gray-400 hover:text-gray-600 hover:bg-gray-200/60 transition-colors"
-            aria-label="Close editor"
+            className="p-1.5 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-200/60 transition-colors"
           >
             <RiCloseLine className="w-5 h-5" />
           </button>
         </div>
 
-        {/* Tab switcher bar */}
-        <div className="flex items-center justify-between px-6 pt-3 pb-2 border-b border-gray-200 bg-white shrink-0">
-          <div className="flex items-center gap-1 bg-gray-100 p-1 rounded-md">
+        <div className="flex items-center justify-between px-6 py-2.5 bg-gray-100/70 border-b border-gray-200 text-xs">
+          <div className="flex items-center gap-1 bg-gray-200/80 p-0.5 rounded-md">
             <button
               onClick={() => setActiveTab('edit')}
               className={`flex items-center gap-1.5 px-3 py-1 text-xs font-medium rounded transition-colors ${
@@ -181,9 +191,7 @@ const DraftDrawer = ({
           )}
         </div>
 
-        {/* Editor / Preview Content Area */}
         <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
-          {/* Subject Field */}
           <div>
             <label htmlFor="draft-subject" className="block text-xs font-semibold text-gray-700 uppercase tracking-wide mb-1.5">
               Subject Line
@@ -199,7 +207,6 @@ const DraftDrawer = ({
             />
           </div>
 
-          {/* Body Field (Edit vs Preview) */}
           <div className="flex flex-col flex-1 h-[calc(100%-4rem)] min-h-[320px]">
             <label htmlFor="draft-body" className="block text-xs font-semibold text-gray-700 uppercase tracking-wide mb-1.5">
               Email Body {activeTab === 'edit' ? '(Editable Plain Text)' : '(Formatted Preview)'}
@@ -220,7 +227,7 @@ const DraftDrawer = ({
                 <iframe
                   title="Email preview"
                   srcDoc={`<!DOCTYPE html><html><body style="font-family: Georgia, serif; font-size: 15px; line-height: 1.7; color: #2c2c2c; padding: 12px;">${previewHtml}</body></html>`}
-                  sandbox="allow-same-origin"
+                  sandbox="allow-same-origin allow-scripts"
                   className="w-full h-full min-h-[300px] border-0"
                 />
               </div>
@@ -228,63 +235,42 @@ const DraftDrawer = ({
           </div>
         </div>
 
-        {/* Footer actions */}
         <div className="flex items-center justify-between gap-3 px-6 py-4 border-t border-gray-200 bg-gray-50 shrink-0">
           <span className="flex items-center gap-1 text-xs text-gray-500">
             Created {relativeTime(draft.created_at)}
           </span>
-          
-          {/* Agent Stated Reasoning Box */}
-          <div className="mt-3 bg-indigo-50/80 border border-indigo-100 rounded-lg p-3 text-xs text-indigo-950 flex items-start gap-2.5">
-            <RiSparklingLine className="w-4 h-4 text-indigo-600 shrink-0 mt-0.5" />
-            <div>
-              <span className="font-semibold text-indigo-900">Agent Stated Reasoning:</span>
-              <p className="mt-0.5 text-indigo-800/90 leading-relaxed">
-                {draft.reasoning || `Targeting candidate-role fit for ${contact?.company || 'company'} with anti-hallucination guardrails enabled. Human approval required before send.`}
-              </p>
-            </div>
-          </div>
-          
+
           <div className="flex items-center gap-2">
             <Button
               variant="danger"
-              size="md"
+              size="sm"
               loading={isDiscarding}
               disabled={isBusy}
               onClick={() => onDiscard(draft.draft_id)}
-              aria-label={`Discard draft for ${contact?.name}`}
             >
-              <RiDeleteBin6Line className="w-4 h-4" />
+              <RiDeleteBin6Line className="w-3.5 h-3.5" />
               Discard
             </Button>
             <Button
               variant="primary"
-              size="md"
+              size="sm"
               loading={isApproving}
               disabled={isBusy}
               onClick={handleApproveAndSend}
-              aria-label={`Approve and send to ${contact?.name}`}
             >
-              <RiCheckLine className="w-4 h-4" />
-              {hasChanges ? 'Save & Send' : 'Approve & Send'}
+              <RiMailSendLine className="w-3.5 h-3.5" />
+              Approve &amp; Send Now
             </Button>
           </div>
         </div>
       </aside>
-
-      <style>{`
-        @keyframes slideInRight {
-          from { transform: translateX(100%); opacity: 0; }
-          to   { transform: translateX(0);    opacity: 1; }
-        }
-      `}</style>
     </>
   );
 };
 
 /* ─── Draft Row ─────────────────────────────────────────────────────────── */
 
-const DraftRow = ({ draft, onSelect, onApprove, onDiscard, approvingId, discardingId }) => {
+const DraftRow = ({ draft, isChecked, onToggleCheck, onSelect, onApprove, onDiscard, approvingId, discardingId }) => {
   const isApproving = approvingId === draft.draft_id;
   const isDiscarding = discardingId === draft.draft_id;
   const isBusy = isApproving || isDiscarding;
@@ -293,10 +279,22 @@ const DraftRow = ({ draft, onSelect, onApprove, onDiscard, approvingId, discardi
 
   return (
     <tr
-      className="border-b border-gray-100 hover:bg-indigo-50/40 align-top cursor-pointer transition-colors"
+      className={`border-b border-gray-100 align-top cursor-pointer transition-colors ${
+        isChecked ? 'bg-indigo-50/70' : 'hover:bg-indigo-50/40'
+      }`}
       onClick={() => onSelect(draft)}
       title="Click to edit/preview full email"
     >
+      {/* Checkbox */}
+      <td className="px-3 py-3.5 w-10 text-center" onClick={(e) => e.stopPropagation()}>
+        <input
+          type="checkbox"
+          checked={isChecked}
+          onChange={() => onToggleCheck(draft.draft_id)}
+          className="w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500 cursor-pointer"
+        />
+      </td>
+
       {/* Recipient */}
       <td className="px-4 py-3 w-48">
         <div className="space-y-0.5">
@@ -340,7 +338,7 @@ const DraftRow = ({ draft, onSelect, onApprove, onDiscard, approvingId, discardi
         </div>
       </td>
 
-      {/* Actions — stop propagation so row click doesn't fire */}
+      {/* Actions */}
       <td className="px-4 py-3 w-40" onClick={(e) => e.stopPropagation()}>
         <div className="flex flex-col gap-1.5">
           <Button
@@ -349,9 +347,8 @@ const DraftRow = ({ draft, onSelect, onApprove, onDiscard, approvingId, discardi
             loading={isApproving}
             disabled={isBusy}
             onClick={() => onApprove(draft.draft_id)}
-            aria-label={`Approve and send to ${contact?.name}`}
           >
-            <RiCheckLine className="w-3.5 h-3.5" aria-hidden="true" />
+            <RiCheckLine className="w-3.5 h-3.5" />
             Approve &amp; Send
           </Button>
           <Button
@@ -360,9 +357,8 @@ const DraftRow = ({ draft, onSelect, onApprove, onDiscard, approvingId, discardi
             loading={isDiscarding}
             disabled={isBusy}
             onClick={() => onDiscard(draft.draft_id)}
-            aria-label={`Discard draft for ${contact?.name}`}
           >
-            <RiDeleteBin6Line className="w-3.5 h-3.5" aria-hidden="true" />
+            <RiDeleteBin6Line className="w-3.5 h-3.5" />
             Discard
           </Button>
         </div>
@@ -381,17 +377,37 @@ const PendingDrafts = () => {
   const [selectedDraft, setSelectedDraft] = useState(null);
   const [isSaving, setIsSaving] = useState(false);
 
+  // Bulk selection states
+  const [selectedIds, setSelectedIds] = useState([]);
+  const [isBatchSending, setIsBatchSending] = useState(false);
+
   const { data, isLoading, isError, refetch } = usePendingDrafts({ page, limit: PAGE_LIMIT });
   const approveDraft = useApproveDraft();
   const discardDraft = useDiscardDraft();
   const updateDraftMutation = useUpdateDraft();
+
+  const drafts = data?.drafts ?? [];
+
+  const handleToggleCheck = (id) => {
+    setSelectedIds((prev) =>
+      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
+    );
+  };
+
+  const handleToggleSelectAll = () => {
+    if (selectedIds.length === drafts.length) {
+      setSelectedIds([]);
+    } else {
+      setSelectedIds(drafts.map((d) => d.draft_id));
+    }
+  };
 
   const handleApprove = async (draftId, payload) => {
     if (!window.confirm('Approve and send this email?')) return;
     setApprovingId(draftId);
     try {
       await approveDraft.mutateAsync({ draftId, data: payload });
-      setSelectedDraft(null); // close drawer after send
+      setSelectedDraft(null);
     } catch (err) {
       window.alert(`Failed to send: ${err.message}`);
     } finally {
@@ -404,7 +420,7 @@ const PendingDrafts = () => {
     setDiscardingId(draftId);
     try {
       await discardDraft.mutateAsync(draftId);
-      setSelectedDraft(null); // close drawer after discard
+      setSelectedDraft(null);
     } catch (err) {
       window.alert(`Failed to discard: ${err.message}`);
     } finally {
@@ -425,12 +441,31 @@ const PendingDrafts = () => {
     }
   };
 
-  const drafts = data?.drafts ?? [];
+  const handleBatchSend = async (idsToSend) => {
+    const count = idsToSend.length;
+    if (!window.confirm(`Are you sure you want to approve and send ${count} email draft${count > 1 ? 's' : ''} now?`)) {
+      return;
+    }
+
+    setIsBatchSending(true);
+    try {
+      const res = await approveBatchDrafts(idsToSend);
+      window.alert(res.message || `Successfully sent ${res.sent_count || count} emails!`);
+      setSelectedIds([]);
+      refetch();
+    } catch (err) {
+      window.alert(`Batch send error: ${err.message}`);
+    } finally {
+      setIsBatchSending(false);
+    }
+  };
+
+  const [batchCount, setBatchCount] = useState(20);
 
   const handleGenerateNow = async () => {
     setIsGenerating(true);
     try {
-      const result = await batchGenerateDrafts(20);
+      const result = await batchGenerateDrafts(batchCount);
       const drafted = result?.drafted ?? 0;
       const failed = result?.failed_count ?? 0;
       if (drafted === 0 && failed === 0) {
@@ -446,6 +481,8 @@ const PendingDrafts = () => {
     }
   };
 
+  const isAllSelected = drafts.length > 0 && selectedIds.length === drafts.length;
+
   return (
     <AppLayout>
       <PageHeader
@@ -456,18 +493,59 @@ const PendingDrafts = () => {
             : 'Email drafts awaiting your approval before sending.'
         }
         actions={
-          <Button
-            id="generate-drafts-now-btn"
-            variant="primary"
-            size="sm"
-            loading={isGenerating}
-            disabled={isGenerating}
-            onClick={handleGenerateNow}
-            aria-label="Generate email drafts now"
-          >
-            <RiSparklingLine className="w-3.5 h-3.5" aria-hidden="true" />
-            {isGenerating ? 'Generating…' : 'Generate Drafts Now'}
-          </Button>
+          <div className="flex items-center gap-2">
+            {selectedIds.length > 0 ? (
+              <Button
+                variant="primary"
+                size="sm"
+                loading={isBatchSending}
+                disabled={isBatchSending}
+                onClick={() => handleBatchSend(selectedIds)}
+              >
+                <RiMailSendLine className="w-3.5 h-3.5" />
+                Send Selected ({selectedIds.length})
+              </Button>
+            ) : drafts.length > 0 ? (
+              <Button
+                variant="secondary"
+                size="sm"
+                loading={isBatchSending}
+                disabled={isBatchSending}
+                onClick={() => handleBatchSend(drafts.map((d) => d.draft_id))}
+              >
+                <RiCheckboxMultipleLine className="w-3.5 h-3.5" />
+                Send All Drafts ({drafts.length})
+              </Button>
+            ) : null}
+
+            <div className="flex items-center bg-gray-100 p-0.5 rounded-lg border border-gray-200">
+              <select
+                value={batchCount}
+                onChange={(e) => setBatchCount(parseInt(e.target.value, 10))}
+                disabled={isGenerating}
+                className="bg-transparent text-xs font-semibold text-gray-700 px-2 py-1 focus:outline-none cursor-pointer"
+                title="Select number of drafts to generate per click"
+              >
+                <option value={5}>5 Drafts</option>
+                <option value={10}>10 Drafts</option>
+                <option value={20}>20 Drafts</option>
+                <option value={30}>30 Drafts</option>
+                <option value={50}>50 Drafts</option>
+                <option value={100}>100 Drafts</option>
+              </select>
+              <Button
+                id="generate-drafts-now-btn"
+                variant="primary"
+                size="sm"
+                loading={isGenerating}
+                disabled={isGenerating}
+                onClick={handleGenerateNow}
+              >
+                <RiSparklingLine className="w-3.5 h-3.5" />
+                {isGenerating ? 'Generating…' : 'Generate Drafts'}
+              </Button>
+            </div>
+          </div>
         }
       />
 
@@ -482,6 +560,16 @@ const PendingDrafts = () => {
             <table className="w-full border-collapse" aria-label="Pending email drafts">
               <thead className="thead-sticky border-b border-gray-200">
                 <tr>
+                  <th scope="col" className="px-3 py-2.5 w-10 text-center">
+                    <input
+                      type="checkbox"
+                      checked={isAllSelected}
+                      onChange={handleToggleSelectAll}
+                      disabled={drafts.length === 0}
+                      className="w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500 cursor-pointer"
+                      title="Select all on this page"
+                    />
+                  </th>
                   {['Recipient', 'Subject & Preview', 'Generated', 'Actions'].map((h) => (
                     <th
                       key={h}
@@ -495,17 +583,17 @@ const PendingDrafts = () => {
               </thead>
 
               {isLoading ? (
-                <TableSkeleton rows={6} cols={4} />
+                <TableSkeleton rows={6} cols={5} />
               ) : drafts.length === 0 ? (
                 <tbody>
                   <tr>
-                    <td colSpan={4}>
+                    <td colSpan={5}>
                       <EmptyState
                         title="No pending drafts"
                         description="All drafts have been sent or discarded."
                         action={
                           <div className="flex items-center gap-1.5 text-sm text-indigo-600">
-                            <RiMailLine className="w-4 h-4" aria-hidden="true" />
+                            <RiMailLine className="w-4 h-4" />
                             Run batch generation to create new drafts
                           </div>
                         }
@@ -519,6 +607,8 @@ const PendingDrafts = () => {
                     <DraftRow
                       key={draft.draft_id}
                       draft={draft}
+                      isChecked={selectedIds.includes(draft.draft_id)}
+                      onToggleCheck={handleToggleCheck}
                       onSelect={setSelectedDraft}
                       onApprove={handleApprove}
                       onDiscard={handleDiscard}
@@ -543,7 +633,6 @@ const PendingDrafts = () => {
         )}
       </div>
 
-      {/* Draft preview & editor drawer */}
       {selectedDraft && (
         <DraftDrawer
           draft={selectedDraft}

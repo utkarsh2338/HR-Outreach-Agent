@@ -1,7 +1,5 @@
 import express from 'express';
-import mongoose from 'mongoose';
-import Contact from '../models/Contact.js';
-import EmailLog from '../models/EmailLog.js';
+import { fileDb } from '../utils/fileDb.js';
 import { sendEmail } from '../services/gmailService.js';
 import { requireAuth } from '../middleware/authMiddleware.js';
 
@@ -11,8 +9,7 @@ router.use(requireAuth);
 
 /**
  * @route   GET /api/email-logs/pending
- * @desc    List all draft_pending EmailLogs for logged-in user with contact info populated.
- *          Supports pagination via ?page and ?limit query params.
+ * @desc    List all draft_pending & failed EmailLogs from fileDb
  */
 router.get('/pending', async (req, res) => {
   try {
@@ -20,29 +17,34 @@ router.get('/pending', async (req, res) => {
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit ?? 20, 10) || 20));
     const skip = (page - 1) * limit;
 
-    const [drafts, total] = await Promise.all([
-      EmailLog.find({ user_id: req.user._id, log_status: 'draft_pending' })
-        .populate('contact_id', 'name email company role_title status tags')
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(limit),
-      EmailLog.countDocuments({ user_id: req.user._id, log_status: 'draft_pending' })
-    ]);
+    const logs = fileDb.getEmailLogs();
+    const pendingLogs = logs.filter(
+      (l) => l.log_status === 'draft_pending' || l.log_status === 'failed'
+    );
+
+    const total = pendingLogs.length;
+    const paginated = pendingLogs.slice(skip, skip + limit);
 
     return res.status(200).json({
       total,
       page,
       limit,
       totalPages: Math.ceil(total / limit) || 1,
-      drafts: drafts.map((d) => ({
+      drafts: paginated.map((d) => ({
         draft_id: d._id,
-        contact: d.contact_id,
+        contact: d.contact || {
+          _id: d.contact_id,
+          name: d.contact_name || 'Recruiter',
+          email: d.contact_email || 'hr@company.com',
+          company: d.company || 'Company',
+          role_title: d.role_title || 'Talent Acquisition'
+        },
         subject: d.subject,
         body: d.body,
         html_body: d.html_body,
         llm_generated: d.llm_generated,
         log_status: d.log_status,
-        created_at: d.createdAt
+        created_at: d.createdAt || d.created_at
       }))
     });
   } catch (error) {
@@ -55,35 +57,24 @@ router.get('/pending', async (req, res) => {
 
 /**
  * @route   PATCH /api/email-logs/:id/discard
- * @desc    Discard a draft_pending EmailLog scoped to user (404 if cross-user)
+ * @desc    Discard a draft_pending / failed EmailLog
  */
 router.patch('/:id/discard', async (req, res) => {
   try {
     const { id } = req.params;
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({ error: 'Invalid email log ID format' });
-    }
+    const logs = fileDb.getEmailLogs();
+    const draft = logs.find((l) => l._id === id);
 
-    const draft = await EmailLog.findOne({ _id: id, user_id: req.user._id });
     if (!draft) return res.status(404).json({ error: 'Email log not found' });
 
-    if (draft.log_status !== 'draft_pending') {
+    if (draft.log_status !== 'draft_pending' && draft.log_status !== 'failed') {
       return res.status(409).json({
-        error: `Only draft_pending logs can be discarded. Current status: "${draft.log_status}"`
+        error: `Only pending or failed logs can be discarded. Current status: "${draft.log_status}"`
       });
     }
 
-    draft.log_status = 'failed';
-    await draft.save();
-
-    if (draft.contact_id) {
-      await Contact.findOneAndUpdate(
-        { _id: draft.contact_id, user_id: req.user._id },
-        { status: 'queued' }
-      );
-    }
-
-    return res.status(200).json({ message: 'Draft discarded.', email_log_id: draft._id });
+    fileDb.updateEmailLog(id, { log_status: 'failed' });
+    return res.status(200).json({ message: 'Draft discarded.', email_log_id: id });
   } catch (error) {
     return res.status(500).json({ error: 'Failed to discard draft', details: error.message });
   }
@@ -91,43 +82,41 @@ router.patch('/:id/discard', async (req, res) => {
 
 /**
  * @route   PATCH /api/email-logs/:id
- * @desc    Update a draft_pending EmailLog's subject, body, and/or html_body scoped to user
+ * @desc    Update a draft_pending / failed EmailLog's subject and body
  */
 router.patch('/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({ error: 'Invalid email log ID format' });
-    }
-
     const { subject, body, html_body } = req.body;
-    const draft = await EmailLog.findOne({ _id: id, user_id: req.user._id });
+    const logs = fileDb.getEmailLogs();
+    const draft = logs.find((l) => l._id === id);
+
     if (!draft) return res.status(404).json({ error: 'Email log not found' });
 
-    if (draft.log_status !== 'draft_pending') {
+    if (draft.log_status !== 'draft_pending' && draft.log_status !== 'failed') {
       return res.status(409).json({
-        error: `Only draft_pending logs can be updated. Current status: "${draft.log_status}"`
+        error: `Only pending or failed logs can be updated. Current status: "${draft.log_status}"`
       });
     }
 
-    if (subject !== undefined) draft.subject = subject;
+    const updates = {};
+    if (subject !== undefined) updates.subject = subject;
     if (body !== undefined) {
-      draft.body = body;
-      if (html_body === undefined) {
-        draft.html_body = body.replace(/\n/g, '<br>');
-      }
+      updates.body = body;
+      updates.html_body = html_body || body.replace(/\n/g, '<br>');
+    } else if (html_body !== undefined) {
+      updates.html_body = html_body;
     }
-    if (html_body !== undefined) draft.html_body = html_body;
 
-    await draft.save();
+    const updated = fileDb.updateEmailLog(id, updates);
 
     return res.status(200).json({
       message: 'Draft updated successfully',
       draft: {
-        draft_id: draft._id,
-        subject: draft.subject,
-        body: draft.body,
-        html_body: draft.html_body
+        draft_id: updated._id,
+        subject: updated.subject,
+        body: updated.body,
+        html_body: updated.html_body
       }
     });
   } catch (error) {
@@ -136,131 +125,120 @@ router.patch('/:id', async (req, res) => {
 });
 
 /**
+ * Helper to process single email send and auto-trim CSV
+ */
+const processSingleSend = async (draftId, user, customSubject, customBody, customHtmlBody) => {
+  const logs = fileDb.getEmailLogs();
+  const draft = logs.find((l) => l._id === draftId);
+  if (!draft) throw new Error('Draft not found');
+
+  if (draft.log_status !== 'draft_pending' && draft.log_status !== 'failed') {
+    throw new Error(`Draft cannot be sent. Current status: "${draft.log_status}"`);
+  }
+
+  const subject = customSubject ?? draft.subject;
+  const textBody = customBody ?? draft.body;
+  const htmlBody = customHtmlBody ?? draft.html_body ?? textBody.replace(/\n/g, '<br>');
+  const recipientEmail = draft.contact?.email || draft.contact_email;
+
+  if (!recipientEmail) throw new Error('Recipient email is missing');
+
+  // Send via Gmail API
+  const { gmail_message_id, gmail_thread_id } = await sendEmail({
+    to: recipientEmail,
+    subject,
+    htmlBody,
+    textBody,
+    user
+  });
+
+  const sentAt = new Date().toISOString();
+
+  // Update EmailLog
+  fileDb.updateEmailLog(draftId, {
+    subject,
+    body: textBody,
+    html_body: htmlBody,
+    log_status: 'sent',
+    sent_at: sentAt,
+    gmail_message_id,
+    gmail_thread_id
+  });
+
+  // Auto-trim contact from sample-contacts.csv and append to sent_contacts.csv
+  fileDb.trimContactFromCsv(recipientEmail);
+
+  return {
+    draft_id: draftId,
+    recipient_email: recipientEmail,
+    sent_at: sentAt,
+    gmail_message_id
+  };
+};
+
+/**
  * @route   POST /api/email-logs/:id/approve-and-send
- * @desc    Human-approval step: take a draft_pending EmailLog, send it via Gmail,
- *          update log status to "sent", and update contact status to "sent".
+ * @desc    Approve & send single email draft via Gmail API + trim CSV
  */
 router.post('/:id/approve-and-send', async (req, res) => {
   try {
     const { id } = req.params;
+    const { subject, body, html_body } = req.body || {};
 
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({ error: 'Invalid email log ID format' });
-    }
-
-    const draft = await EmailLog.findOne({ _id: id, user_id: req.user._id }).populate('contact_id');
-    if (!draft) {
-      return res.status(404).json({ error: 'Email log (draft) not found' });
-    }
-
-    if (draft.log_status !== 'draft_pending') {
-      return res.status(409).json({
-        error: `This draft cannot be sent. Current status: "${draft.log_status}". Only "draft_pending" drafts can be approved.`
-      });
-    }
-
-    // Allow overriding subject/body directly at approve time if passed
-    const { subject: customSubject, body: customBody, html_body: customHtmlBody } = req.body || {};
-    if (customSubject !== undefined) draft.subject = customSubject;
-    if (customBody !== undefined) {
-      draft.body = customBody;
-      draft.html_body = customHtmlBody || customBody.replace(/\n/g, '<br>');
-    } else if (customHtmlBody !== undefined) {
-      draft.html_body = customHtmlBody;
-    }
-
-    const contact = draft.contact_id;
-    if (!contact) {
-      return res.status(404).json({ error: 'Contact associated with this draft no longer exists' });
-    }
-
-    // --- User Specific Rate Limiter ---
-    const DAILY_SEND_LIMIT = req.user.daily_send_limit || parseInt(process.env.DAILY_SEND_LIMIT || '20', 10);
-    const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
-
-    const sentCount = await EmailLog.countDocuments({
-      user_id: req.user._id,
-      direction: 'outbound',
-      log_status: 'sent',
-      sent_at: { $gte: since }
-    });
-
-    if (sentCount >= DAILY_SEND_LIMIT) {
-      return res.status(429).json({
-        error: `Daily send limit reached (${DAILY_SEND_LIMIT} emails/24h). Try again later.`,
-        sent_in_last_24h: sentCount,
-        limit: DAILY_SEND_LIMIT
-      });
-    }
-
-    // Send via Gmail API
-    const { gmail_message_id, gmail_thread_id } = await sendEmail({
-      to: contact.email,
-      subject: draft.subject,
-      htmlBody: draft.html_body || draft.body,
-      textBody: draft.body,
-      user: req.user
-    });
-
-    const sentAt = new Date();
-
-    draft.log_status = 'sent';
-    draft.sent_at = sentAt;
-    draft.gmail_message_id = gmail_message_id;
-    draft.gmail_thread_id = gmail_thread_id;
-    await draft.save();
-
-    await Contact.findOneAndUpdate(
-      { _id: contact._id, user_id: req.user._id },
-      { status: 'sent', last_contacted_at: sentAt }
-    );
+    const result = await processSingleSend(id, req.user, subject, body, html_body);
 
     return res.status(200).json({
-      message: 'Draft approved and email sent successfully.',
-      email_log_id: draft._id,
-      contact: {
-        id: contact._id,
-        name: contact.name,
-        email: contact.email,
-        status: 'sent',
-        last_contacted_at: sentAt
-      },
-      subject: draft.subject,
-      sent_at: sentAt,
-      llm_generated: draft.llm_generated,
-      daily_quota: {
-        sent_in_last_24h: sentCount + 1,
-        limit: DAILY_SEND_LIMIT,
-        remaining: DAILY_SEND_LIMIT - sentCount - 1
-      }
+      message: 'Draft approved and email sent successfully. Recipient removed from sample-contacts.csv!',
+      ...result
     });
   } catch (error) {
-    if (mongoose.Types.ObjectId.isValid(req.params.id)) {
-      try {
-        await EmailLog.findOneAndUpdate(
-          { _id: req.params.id, user_id: req.user._id },
-          { log_status: 'failed' }
-        );
-      } catch (_) {
-        // Ignore secondary error
-      }
-    }
-
-    if (error.message?.includes('Gmail OAuth2 credentials')) {
-      return res.status(500).json({
-        error: 'Gmail credentials not configured',
-        details: error.message
-      });
-    }
-    if (error.code === 401 || error.response?.status === 401) {
-      return res.status(500).json({
-        error: 'Gmail authentication failed. Check your OAuth2 credentials and refresh token.',
-        details: error.message
-      });
+    console.error('[approveSend error]', error.message);
+    if (req.params.id) {
+      fileDb.updateEmailLog(req.params.id, { log_status: 'failed' });
     }
 
     return res.status(500).json({
       error: 'Failed to send approved draft',
+      details: error.message
+    });
+  }
+});
+
+/**
+ * @route   POST /api/email-logs/approve-batch
+ * @desc    Approve and send multiple selected drafts in bulk loop
+ */
+router.post('/approve-batch', async (req, res) => {
+  try {
+    const { draft_ids } = req.body;
+    if (!Array.isArray(draft_ids) || draft_ids.length === 0) {
+      return res.status(400).json({ error: 'Please provide an array of draft_ids to send.' });
+    }
+
+    const sent = [];
+    const failed = [];
+
+    for (const draftId of draft_ids) {
+      try {
+        const result = await processSingleSend(draftId, req.user);
+        sent.push(result);
+      } catch (err) {
+        console.error(`[approveBatch] Error sending draft ${draftId}: ${err.message}`);
+        fileDb.updateEmailLog(draftId, { log_status: 'failed' });
+        failed.push({ draft_id: draftId, reason: err.message });
+      }
+    }
+
+    return res.status(200).json({
+      message: `Batch send complete. ${sent.length} sent successfully, ${failed.length} failed.`,
+      sent_count: sent.length,
+      failed_count: failed.length,
+      sent,
+      failed
+    });
+  } catch (error) {
+    return res.status(500).json({
+      error: 'Batch send failed',
       details: error.message
     });
   }

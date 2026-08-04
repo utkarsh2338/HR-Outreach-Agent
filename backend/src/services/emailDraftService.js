@@ -1,51 +1,54 @@
 import UserProfile from '../models/UserProfile.js';
-import { generatePersonalizedOpener, generateFullPersonalizedEmail } from './groqService.js';
+import { generatePersonalizedOpener } from './groqService.js';
 import { buildColdEmail } from '../templates/coldEmail.js';
+import { verifyEmail, VerificationResult } from './emailVerifierService.js';
 
 /**
  * Generates a personalized email draft for a contact.
  *
- * Primary path: Uses candidate's active UserProfile (Resume, GitHub, LinkedIn analysis)
- * to generate a completely tailored, recruiter-ready cold email.
+ * Architecture:
+ * 1. Performs multi-stage Email Verification (Syntax, DNS MX Lookup, SMTP Handshake).
+ *    If email is INVALID or FORMAT_ERROR, draft generation is aborted.
+ * 2. Uses Groq (Llama 3.3 70B) to generate a tailored 1-sentence opening hook.
+ * 3. Assembles the email body using candidate's UserProfile (Resume, GitHub, LinkedIn)
+ *    and structured template engine (coldEmail.js).
  *
- * Fallback path: Uses Groq opener + static template if no profile is available.
- *
- * @param {object} contact - A Contact mongoose document (or plain object)
+ * @param {object} contact - A Contact document or plain object from CSV/storage
+ * @param {string} [fallbackUserId]
  * @returns {Promise<{
  *   subject: string,
  *   htmlBody: string,
  *   textBody: string,
  *   llm_generated: boolean,
- *   opener?: string
+ *   opener?: string,
+ *   verification: object
  * }>}
  */
-export const generateEmailDraft = async (contact) => {
-  const { name, company, role_title, notes, user_id } = contact;
-  let userProfile = null;
+export const generateEmailDraft = async (contact, fallbackUserId) => {
+  const { name, company, role_title, notes, user_id, email } = contact || {};
 
-  // Step 1: Check if user profile is populated for candidate
-  try {
-    if (user_id) {
-      userProfile = await UserProfile.getProfile(user_id);
-    }
+  // Step 1: Real-time Email Verification (Syntax, DNS MX, SMTP Socket Handshake)
+  const verification = await verifyEmail(email);
 
-    if (userProfile && (userProfile.resume_text || userProfile.parsed_profile?.name || userProfile.github_url)) {
-      const personalizedDraft = await generateFullPersonalizedEmail({ userProfile, contact });
-
-      if (personalizedDraft) {
-        return {
-          subject: personalizedDraft.subject,
-          textBody: personalizedDraft.textBody,
-          htmlBody: personalizedDraft.htmlBody,
-          llm_generated: true
-        };
-      }
-    }
-  } catch (err) {
-    console.warn(`[emailDraftService] Profile fetch failed, resorting to standard opener template: ${err.message}`);
+  if (verification.status === VerificationResult.FORMAT_ERROR || verification.status === VerificationResult.INVALID) {
+    throw new Error(`Email verification failed for "${email || 'missing'}" (${verification.status}): ${verification.reason}. Draft generation aborted.`);
   }
 
-  // Step 2: Fallback to single opener + template
+  // Step 2: Fetch active candidate profile
+  let userProfile = null;
+  try {
+    const targetUserId = user_id || fallbackUserId;
+    if (targetUserId) {
+      userProfile = await UserProfile.getProfile(targetUserId);
+    }
+    if (!userProfile) {
+      userProfile = await UserProfile.findOne({});
+    }
+  } catch (err) {
+    console.warn(`[emailDraftService] Profile fetch warning: ${err.message}`);
+  }
+
+  // Step 3: Generate personalized opener via Groq
   const { opener, llm_generated } = await generatePersonalizedOpener({
     name,
     company,
@@ -53,6 +56,7 @@ export const generateEmailDraft = async (contact) => {
     notes
   });
 
+  // Step 4: Assemble full draft via deterministic template engine (coldEmail.js)
   const { subject, htmlBody, textBody } = buildColdEmail({
     name,
     company,
@@ -66,6 +70,7 @@ export const generateEmailDraft = async (contact) => {
     htmlBody,
     textBody,
     llm_generated,
-    opener
+    opener,
+    verification
   };
 };

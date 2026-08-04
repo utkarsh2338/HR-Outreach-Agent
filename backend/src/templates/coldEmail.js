@@ -1,3 +1,5 @@
+import { fileDb } from '../utils/fileDb.js';
+
 /**
  * Dynamic Personal Cold Email Template
  * Renders tailored outreach emails using the active candidate's profile (name, headline/education, projects, links)
@@ -16,23 +18,34 @@ export const buildColdEmail = ({ name, company, role_title, opener, candidate })
   const companyName = company ? company.trim() : 'your company';
 
   // Extract candidate data from UserProfile or fallback object
-  const profile = candidate?.parsed_profile || candidate || {};
-  const candidateName = profile.name || candidate?.name || 'Utkarsh Shukla';
+  const activeProfile = fileDb.getProfile();
+  const profile = candidate?.parsed_profile || candidate || activeProfile?.parsed_profile || {};
+  let candidateName = profile.name || candidate?.name || activeProfile?.name || 'Tanish Patidar';
+  candidateName = candidateName.replace(/Email:.*$/i, '').trim() || 'Tanish Patidar';
 
-  const linkedinUrl = candidate?.linkedin_url || profile.linkedin_url || 'https://www.linkedin.com/in/utkarshshukla1007/';
-  const githubUrl = candidate?.github_url || profile.github_url || 'https://github.com/utkarsh2338';
-  const phone = profile.contact_info?.phone || candidate?.phone || '+91 7905342263';
+  const linkedinUrl = candidate?.linkedin_url || profile.linkedin_url || activeProfile?.linkedin_url || 'https://www.linkedin.com/in/tanish07patidar-/';
+  const githubUrl = candidate?.github_url || profile.github_url || activeProfile?.github_url || 'https://github.com/TechTAnish-07';
+  const portfolioUrl = candidate?.portfolio_url || profile.portfolio_url || activeProfile?.portfolio_url || '';
+  const resumeUrl = candidate?.resume_url || profile.resume_url || activeProfile?.resume_url || '';
+  const phone = profile.contact_info?.phone || candidate?.phone || '';
 
   // Candidate headline or education summary
   const candidateHeadline =
     profile.career_focus ||
     profile.headline ||
     (profile.education?.[0]
-      ? `${profile.education[0].degree || 'Computer Science student'} at ${profile.education[0].institution || 'university'}`
-      : 'final year Computer Science student at IIIT Tiruchirappalli');
+      ? `${profile.education[0].degree || 'Software Engineering student'} at ${profile.education[0].institution || 'university'}`
+      : 'Full-Stack Software Engineering candidate');
 
-  const targetRole = role_title || 'SDE-1 / Software Engineering';
-  const subject = `Exploring ${targetRole} Roles at ${companyName} — ${candidateName}`;
+  // Candidate's target role is derived from candidate's profile/resume, NOT the recruiter's HR title
+  const targetRole =
+    profile.career_focus ||
+    profile.target_role ||
+    (profile.headline && !profile.headline.toLowerCase().includes('recruiter') ? profile.headline : null) ||
+    'Software Engineer / Full-Stack Developer';
+
+  // Clean ASCII hyphen to prevent UTF-8 header double-encoding corruption
+  const subject = `Exploring ${targetRole} Roles at ${companyName} - ${candidateName}`;
 
   const personalizedHook = opener ? `${opener}\n\n` : '';
   const personalizedHookHtml = opener ? `<p style="margin-bottom: 16px;">${opener}</p>` : '';
@@ -58,17 +71,31 @@ export const buildColdEmail = ({ name, company, role_title, opener, candidate })
     bulletPoints.push(profile.achievements.slice(0, 2).join('; '));
   }
 
-  // Fallback bullet points if no profile points are available
+  // Fallback bullet points tailored for candidate Tanish Patidar
   if (bulletPoints.length === 0) {
     bulletPoints = [
-      'Currently Technical Lead at Atyant, where I lead a team of 11 developers and built a production platform end-to-end — 100+ REST APIs, real-time WebSocket infrastructure, Redis caching, and JWT/OAuth authentication, serving 1,500+ users.',
-      'Independently built and shipped two full-stack projects: GymRatHub (a fitness tracking platform) and NexMeet (a WebRTC-based video conferencing app).',
-      'Strong problem-solving foundation: 1,300+ DSA problems solved, LeetCode Knight (1830 rating), Codeforces Pupil (1206 rating).'
+      'Full-stack developer experienced in building scalable, production-ready web applications using React, Node.js, Express, and modern database architectures.',
+      'Engineered end-to-end RESTful APIs, real-time WebSocket integrations, authentication systems, and responsive, high-performance UI components.',
+      'Strong problem-solving foundation with deep expertise in JavaScript/TypeScript, data structures, and software engineering best practices.'
     ];
   }
 
   const textBullets = bulletPoints.map((b) => `• ${b}`).join('\n');
   const htmlBullets = bulletPoints.map((b) => `<li style="margin-bottom: 8px;">${b}</li>`).join('\n');
+
+  const linksText = [
+    linkedinUrl ? `LinkedIn: ${linkedinUrl}` : '',
+    githubUrl ? `GitHub: ${githubUrl}` : '',
+    portfolioUrl ? `Portfolio: ${portfolioUrl}` : '',
+    resumeUrl ? `Resume PDF: ${resumeUrl}` : ''
+  ].filter(Boolean).join('\n');
+
+  const linksHtml = [
+    linkedinUrl ? `LinkedIn: <a href="${linkedinUrl}" target="_blank" rel="noopener noreferrer" style="color: #2563eb; text-decoration: underline; font-weight: 600;">${linkedinUrl}</a>` : '',
+    githubUrl ? `GitHub: <a href="${githubUrl}" target="_blank" rel="noopener noreferrer" style="color: #2563eb; text-decoration: underline; font-weight: 600;">${githubUrl}</a>` : '',
+    portfolioUrl ? `Portfolio: <a href="${portfolioUrl}" target="_blank" rel="noopener noreferrer" style="color: #2563eb; text-decoration: underline; font-weight: 600;">${portfolioUrl}</a>` : '',
+    resumeUrl ? `Resume PDF: <a href="${resumeUrl}" target="_blank" rel="noopener noreferrer" style="color: #2563eb; text-decoration: underline; font-weight: 600;">${resumeUrl}</a>` : ''
+  ].filter(Boolean).join('<br>');
 
   const textBody = `Hi ${greeting},
 
@@ -77,13 +104,13 @@ ${personalizedHook}I'm ${candidateName}, ${candidateHeadline}, reaching out to e
 A quick snapshot of my background:
 ${textBullets}
 
-I've attached my resume for your reference. I'd welcome the opportunity to discuss any open ${role_title || 'SDE-1'} or internship roles that might be a fit, and I'm happy to share more details or complete any assessments as needed.
+I'd welcome the opportunity to discuss any open ${targetRole} or internship roles that might be a fit, and I'm happy to share more details or complete any assessments as needed.
 
 Thank you for your time and consideration.
 
 Best regards,
 ${candidateName}
-${phone ? `${phone} | ` : ''}LinkedIn: ${linkedinUrl} | GitHub: ${githubUrl}`;
+${phone ? `${phone} | ` : ''}${linksText}`;
 
   const htmlBody = `<!DOCTYPE html>
 <html>
@@ -107,7 +134,7 @@ ${phone ? `${phone} | ` : ''}LinkedIn: ${linkedinUrl} | GitHub: ${githubUrl}`;
   </ul>
 
   <p style="margin-bottom: 16px;">
-    I've attached my resume for your reference. I'd welcome the opportunity to discuss any open ${role_title || 'SDE-1'} or internship roles that might be a fit, and I'm happy to share more details or complete any assessments as needed.
+    I'd welcome the opportunity to discuss any open <strong>${targetRole}</strong> or internship roles that might be a fit, and I'm happy to share more details or complete any assessments as needed.
   </p>
 
   <p style="margin-bottom: 24px;">Thank you for your time and consideration.</p>
@@ -117,8 +144,7 @@ ${phone ? `${phone} | ` : ''}LinkedIn: ${linkedinUrl} | GitHub: ${githubUrl}`;
     <strong>${candidateName}</strong><br>
     <span style="color: #4b5563; font-size: 13.5px;">
       ${phone ? `${phone} | ` : ''}
-      <a href="${linkedinUrl}" style="color: #2563eb; text-decoration: none;">LinkedIn</a> |
-      <a href="${githubUrl}" style="color: #2563eb; text-decoration: none;">GitHub</a>
+      ${linksHtml}
     </span>
   </p>
 

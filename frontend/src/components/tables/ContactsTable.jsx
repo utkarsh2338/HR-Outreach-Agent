@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { RiDeleteBin6Line, RiArrowUpDownLine } from 'react-icons/ri';
 import { StatusSelect } from '../common/StatusSelect.jsx';
-import { StatusBadge } from '../common/Badge.jsx';
 import { TableSkeleton } from '../common/Skeleton.jsx';
 import { EmptyState } from '../common/EmptyState.jsx';
 import { useUpdateContact, useDeleteContact } from '../../hooks/useContacts.js';
@@ -9,13 +8,12 @@ import { shortDate, relativeTime } from '../../utils/format.js';
 import { cn } from '../../utils/cn.js';
 
 const COLUMNS = [
-  { key: 'name',             label: 'Name',           sortable: true,  width: 'w-48' },
-  { key: 'company',          label: 'Company',         sortable: true,  width: 'w-40' },
-  { key: 'email',            label: 'Email',           sortable: false, width: 'w-52' },
-  { key: 'status',           label: 'Status',          sortable: false, width: 'w-36' },
-  { key: 'tags',             label: 'Tags',            sortable: false, width: 'w-36' },
-  { key: 'last_contacted_at',label: 'Last Contacted',  sortable: true,  width: 'w-32' },
-  { key: 'actions',          label: '',                sortable: false, width: 'w-16' },
+  { key: 'name', label: 'HR Name & Title', sortable: true, width: 'w-56' },
+  { key: 'company', label: 'Company', sortable: true, width: 'w-44' },
+  { key: 'email', label: 'Email Address', sortable: false, width: 'w-56' },
+  { key: 'status', label: 'Status', sortable: false, width: 'w-36' },
+  { key: 'last_contacted_at', label: 'Last Contacted', sortable: true, width: 'w-32' },
+  { key: 'actions', label: '', sortable: false, width: 'w-12' },
 ];
 
 const SortIcon = ({ column, sortKey, sortDir }) => {
@@ -28,52 +26,62 @@ const SortIcon = ({ column, sortKey, sortDir }) => {
   );
 };
 
-const TagPills = ({ tags }) => {
-  if (!tags?.length) return <span className="text-gray-300">—</span>;
-  const visible = tags.slice(0, 2);
-  const overflow = tags.length - 2;
-  return (
-    <div className="flex items-center gap-1 flex-wrap">
-      {visible.map((tag) => (
-        <span
-          key={tag}
-          className="inline-flex items-center rounded px-1.5 py-0.5 text-2xs font-medium bg-gray-100 text-gray-600"
-        >
-          {tag}
-        </span>
-      ))}
-      {overflow > 0 && (
-        <span className="text-2xs text-gray-400">+{overflow}</span>
-      )}
-    </div>
-  );
-};
-
-const ContactRow = ({ contact, onStatusChange, onDelete, mutatingId }) => {
+const ContactRow = ({ contact, isChecked, onToggleCheck, onStatusChange, onDelete, mutatingId }) => {
   const isMutating = mutatingId === contact._id;
 
   return (
-    <tr className="border-b border-gray-100 hover:bg-gray-50 group">
+    <tr className={`border-b border-gray-100 transition-colors ${isChecked ? 'bg-indigo-50/70' : 'hover:bg-gray-50'}`}>
+      {/* Checkbox */}
+      <td className="px-3 py-3 w-10 text-center">
+        <input
+          type="checkbox"
+          checked={isChecked}
+          onChange={() => onToggleCheck(contact._id)}
+          className="w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500 cursor-pointer"
+        />
+      </td>
+
+      {/* Name & Title */}
       <td className="px-4 py-3">
         <div className="flex flex-col">
-          <span className="text-sm font-medium text-gray-900 truncate max-w-[11rem]">
-            {contact.name}
+          <span className="text-sm font-medium text-gray-900 truncate max-w-[13rem]">
+            {contact.name || 'Recruiter'}
           </span>
           {contact.role_title && (
-            <span className="text-xs text-gray-400 truncate max-w-[11rem]">
+            <span className="text-xs text-gray-500 truncate max-w-[13rem]">
               {contact.role_title}
             </span>
           )}
         </div>
       </td>
-      <td className="px-4 py-3 text-sm text-gray-600 truncate max-w-[10rem]">
-        {contact.company}
-      </td>
+
+      {/* Company & Domain */}
       <td className="px-4 py-3">
-        <span className="text-sm text-gray-500 truncate block max-w-[13rem]">
-          {contact.email}
+        <div className="flex flex-col">
+          <span className="text-sm font-semibold text-gray-800 truncate max-w-[11rem]">
+            {contact.company || 'Company'}
+          </span>
+          {contact.company_domain && (
+            <a
+              href={contact.company_domain.startsWith('http') ? contact.company_domain : `https://${contact.company_domain}`}
+              target="_blank"
+              rel="noreferrer"
+              className="text-2xs text-indigo-600 hover:underline truncate max-w-[11rem]"
+            >
+              {contact.company_domain.replace(/^https?:\/\//, '')}
+            </a>
+          )}
+        </div>
+      </td>
+
+      {/* Email */}
+      <td className="px-4 py-3">
+        <span className="text-sm text-gray-600 font-mono truncate block max-w-[14rem]">
+          {contact.email || '—'}
         </span>
       </td>
+
+      {/* Status */}
       <td className="px-4 py-3">
         <StatusSelect
           value={contact.status}
@@ -81,17 +89,18 @@ const ContactRow = ({ contact, onStatusChange, onDelete, mutatingId }) => {
           disabled={isMutating}
         />
       </td>
-      <td className="px-4 py-3">
-        <TagPills tags={contact.tags} />
-      </td>
+
+      {/* Last Contacted */}
       <td className="px-4 py-3">
         <span
-          className="text-xs text-gray-500 cursor-default"
+          className="text-xs text-gray-400 cursor-default"
           title={relativeTime(contact.last_contacted_at)}
         >
           {shortDate(contact.last_contacted_at)}
         </span>
       </td>
+
+      {/* Actions */}
       <td className="px-4 py-3">
         <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
           <button
@@ -100,7 +109,7 @@ const ContactRow = ({ contact, onStatusChange, onDelete, mutatingId }) => {
             aria-label={`Delete ${contact.name}`}
             className="inline-flex items-center justify-center w-6 h-6 rounded text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors disabled:opacity-50"
           >
-            <RiDeleteBin6Line className="w-3.5 h-3.5" aria-hidden="true" />
+            <RiDeleteBin6Line className="w-3.5 h-3.5" />
           </button>
         </div>
       </td>
@@ -108,11 +117,14 @@ const ContactRow = ({ contact, onStatusChange, onDelete, mutatingId }) => {
   );
 };
 
-/**
- * Full-featured contacts table with sticky header, inline status editing,
- * sortable columns (client-side on current page), and delete action.
- */
-export const ContactsTable = ({ data, isLoading, isError }) => {
+export const ContactsTable = ({
+  data,
+  isLoading,
+  isError,
+  selectedIds = [],
+  onToggleCheck,
+  onToggleSelectAll
+}) => {
   const [sortKey, setSortKey] = useState(null);
   const [sortDir, setSortDir] = useState('asc');
   const [mutatingId, setMutatingId] = useState(null);
@@ -140,7 +152,7 @@ export const ContactsTable = ({ data, isLoading, isError }) => {
   };
 
   const handleDelete = async (id) => {
-    if (!window.confirm('Remove this contact?')) return;
+    if (!window.confirm('Remove this HR contact?')) return;
     setMutatingId(id);
     try {
       await deleteContact.mutateAsync(id);
@@ -149,7 +161,6 @@ export const ContactsTable = ({ data, isLoading, isError }) => {
     }
   };
 
-  // Client-side sort on current page
   const contacts = data?.contacts ?? [];
   const sorted = sortKey
     ? [...contacts].sort((a, b) => {
@@ -160,11 +171,23 @@ export const ContactsTable = ({ data, isLoading, isError }) => {
       })
     : contacts;
 
+  const isAllSelected = sorted.length > 0 && selectedIds.length === sorted.length;
+
   return (
     <div className="table-container">
       <table className="w-full border-collapse" aria-label="Contacts table">
         <thead className="thead-sticky">
           <tr className="border-b border-gray-200">
+            <th scope="col" className="px-3 py-2.5 w-10 text-center">
+              <input
+                type="checkbox"
+                checked={isAllSelected}
+                onChange={() => onToggleSelectAll(sorted.map((c) => c._id))}
+                disabled={sorted.length === 0}
+                className="w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500 cursor-pointer"
+                title="Select all HRs on this page"
+              />
+            </th>
             {COLUMNS.map((col) => (
               <th
                 key={col.key}
@@ -193,7 +216,7 @@ export const ContactsTable = ({ data, isLoading, isError }) => {
           <tbody>
             <tr>
               <td colSpan={7} className="text-center py-12 text-sm text-gray-500">
-                Failed to load contacts.
+                Failed to load HR contacts.
               </td>
             </tr>
           </tbody>
@@ -203,7 +226,7 @@ export const ContactsTable = ({ data, isLoading, isError }) => {
               <td colSpan={7}>
                 <EmptyState
                   title="No contacts found"
-                  description="Try adjusting your search or filters."
+                  description="No HR contacts matched your search filter."
                 />
               </td>
             </tr>
@@ -214,6 +237,8 @@ export const ContactsTable = ({ data, isLoading, isError }) => {
               <ContactRow
                 key={contact._id}
                 contact={contact}
+                isChecked={selectedIds.includes(contact._id)}
+                onToggleCheck={onToggleCheck}
                 onStatusChange={handleStatusChange}
                 onDelete={handleDelete}
                 mutatingId={mutatingId}

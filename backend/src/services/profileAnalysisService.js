@@ -2,14 +2,33 @@ import Groq from 'groq-sdk';
 import { LLM_MODEL } from '../config/llm.js';
 
 /**
+ * Clean and normalize PDF-extracted text (rejoins fragmented lines & fixes squished headers)
+ */
+const normalizeResumeText = (rawText = '') => {
+  if (!rawText) return '';
+  
+  let text = rawText;
+
+  // Fix squished date patterns (e.g. "47BillionMay 2026" -> "47Billion May 2026")
+  text = text.replace(/([a-zA-Z])(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s*(\d{4})/gi, '$1 $2 $3');
+  // Fix squished title patterns (e.g. "InternIndore" -> "Intern Indore")
+  text = text.replace(/([a-z])([A-Z][a-z]+)/g, '$1 $2');
+  // Remove link noise (e.g. "| Code | Live", "(Certificate)")
+  text = text.replace(/\|\s*(Code|Live|Demo)\s*/gi, '');
+  text = text.replace(/\(Certificate\)/gi, '');
+
+  return text.trim();
+};
+
+/**
  * 100% Generic & Dynamic Resume Text Parser.
  * Works for ANY candidate's uploaded resume PDF/DOCX or text.
- * Dynamically extracts sections: Name, Contact Info, Experience, Projects, Skills, Education, and Achievements.
+ * STICKLY PRIORITIZES THE UPLOADED RESUME OVER GITHUB DATA.
  */
 export const parseResumeTextIntelligently = (resumeText = '', githubData = null, linkedinData = null) => {
-  const text = (resumeText || '').trim();
+  const text = normalizeResumeText(resumeText);
 
-  // 1. Dynamic Name Extraction — stops at first line that looks like a real name
+  // 1. Dynamic Name Extraction
   let name = '';
   if (text) {
     const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
@@ -33,7 +52,7 @@ export const parseResumeTextIntelligently = (resumeText = '', githubData = null,
   if (!name && githubData?.name) name = githubData.name;
   if (!name) name = 'Candidate';
 
-  // 2. Contact Info — broad international phone support (fix #6)
+  // 2. Contact Info
   const emailMatch = text.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
   const phoneMatch = text.match(
     /(?:\+?(?:\d{1,3})[-.\s]?)?(?:\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}|\d{10}|\d{5}[-.\s]\d{5})/
@@ -41,7 +60,7 @@ export const parseResumeTextIntelligently = (resumeText = '', githubData = null,
   const email = emailMatch ? emailMatch[0] : (githubData?.email || '');
   const phone = phoneMatch ? phoneMatch[0] : '';
 
-  // Helper: extract date ranges like "Jan 2024 – May 2025", "2022 - Present", "May 2026 – July 2026"
+  // Helper: extract date ranges
   const extractDate = (str) => {
     const m = str.match(
       /(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)?\.?\s*\d{4}\s*[-–—]\s*(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)?\.?\s*(?:\d{4}|Present|Current)/i
@@ -49,7 +68,7 @@ export const parseResumeTextIntelligently = (resumeText = '', githubData = null,
     return m ? m[0].trim() : '';
   };
 
-  // 3. Section Locator — finds start/end of each named section in the raw text
+  // 3. Section Locator
   const SECTION_TITLES = [
     'Education', 'Experience', 'Work Experience', 'Professional Experience', 'Employment History',
     'Technical Skills', 'Skills', 'Projects', 'Personal Projects', 'Side Projects',
@@ -72,127 +91,110 @@ export const parseResumeTextIntelligently = (resumeText = '', githubData = null,
     if (!found) return '';
     const next = sectionMatches.find((s) => s.index > found.index);
     const raw = text.substring(found.index, next ? next.index : text.length);
-    // Strip the section heading line itself before returning (fix #3, #4 root cause)
     return raw.replace(/^[^\n]*\n/, '').trim();
   };
 
-  const expText  = getSectionText(['experience', 'employment']);
-  const projText = getSectionText(['projects', 'personal project', 'side project']);
+  const expText   = getSectionText(['experience', 'employment']);
+  const projText  = getSectionText(['projects', 'personal project', 'side project']);
   const skillText = getSectionText(['skills', 'technical']);
-  const eduText  = getSectionText(['education']);
-  const achText  = getSectionText(['achievements', 'certifications', 'honors', 'awards']);
+  const eduText   = getSectionText(['education']);
+  const achText   = getSectionText(['achievements', 'certifications', 'honors', 'awards']);
 
-  // 4. Work Experience — header line vs. bullet lines correctly separated (fix #2)
+  // 4. Work Experience — strictly parse resume text
   const work_experience = [];
   if (expText) {
-    // Split into job blocks: a new block starts on a non-bullet line
     const jobBlocks = expText
-      .split(/\n(?=[^•◦*\-\s])/)
+      .split(/\n(?=[•◦*-]?\s*[A-Z0-9][a-zA-Z0-9\s—–|-]+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|\d{4}))/i)
       .map((b) => b.trim())
-      .filter((b) => b.length > 5);
+      .filter((b) => b.length > 10);
 
-    for (const block of jobBlocks.slice(0, 3)) {
+    const fallbackBlocks = jobBlocks.length > 0 ? jobBlocks : expText.split(/\n(?=[^•◦*\-\s])/).map((b) => b.trim()).filter((b) => b.length > 10);
+
+    for (const block of fallbackBlocks.slice(0, 3)) {
       const lines = block.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
       const header = lines[0].replace(/^[•◦*\-]\s*/, '');
 
-      // Skip pure bullet lines and standalone date-only lines as job headers
       if (/^[•◦*\-]/.test(lines[0])) continue;
-      if (/^(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{4}/i.test(header)) continue;
 
       const sepMatch = header.match(/^(.+?)(?:\s*[|@]\s*|\s+at\s+|\s*[–-]\s*)(.+?)(?:\s*[|@].*)?$/i);
       let title = '', company = '';
       if (sepMatch) {
-        title = sepMatch[1].trim();
-        company = sepMatch[2].trim();
-        // If company absorbed a date, clean it
-        company = company.replace(/\s*(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec).*$/i, '').trim();
+        title   = sepMatch[1].trim();
+        company = sepMatch[2].trim().replace(/\s*(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec).*$/i, '').trim();
       } else {
-        title = header;
-        // next non-bullet, non-date line = company
+        title = header.split(/–|-|\d{4}/)[0].trim();
         const compLine = lines.slice(1).find(
           (l) => !/^[•◦*\-]/.test(l) && !/^(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)/i.test(l)
         );
         company = compLine || '';
       }
 
-      // Duration: look in header, all early lines
       const duration = extractDate(header) || extractDate(lines.slice(1, 3).join(' '));
 
-      // Collect bullet-point description lines only
       const bullets = lines
         .slice(1)
-        .filter((l) => /^[•◦*\-]/.test(l))
+        .filter((l) => /^[•◦*\-]/.test(l) || l.length > 20)
         .map((l) => l.replace(/^[•◦*\-]\s*/, '').trim())
-        .filter(Boolean);
+        .filter((l) => l.length > 10 && !/^(experience|employment|work)/i.test(l));
 
-      // Skip if title looks like a section heading or a date
       if (!title || title.length > 60 || /^(experience|employment|work)/i.test(title)) continue;
 
-      work_experience.push({ title, company: company || 'Company', duration, description: bullets.join(' ') });
+      work_experience.push({
+        title,
+        company: company || 'Company',
+        duration,
+        description: bullets.join(' ')
+      });
     }
   }
 
-  // 5. Projects — section heading NOT included as a project (fix #3)
+  // 5. Projects — STICKLY DERIVED FROM RESUME TEXT ONLY
   const projects = [];
   if (projText) {
-    // Merge "Tech Stack: ..." lines back into the preceding project block so they aren't split off
-    const rawProjBlocks = projText.split(/\n(?=[^•◦*\-\s\n])/).map((b) => b.trim()).filter((b) => b.length > 10);
-    const projBlocks = [];
-    for (const blk of rawProjBlocks) {
-      if (/^tech(\s+stack)?\s*[:\s]/i.test(blk) && projBlocks.length > 0) {
-        projBlocks[projBlocks.length - 1] += '\n' + blk;
-      } else {
-        projBlocks.push(blk);
-      }
-    }
-
-    for (const block of projBlocks.slice(0, 3)) {
+    const rawProjBlocks = projText.split(/\n(?=[•◦*-]?\s*[A-Z0-9][a-zA-Z0-9\s.:'-]+[—–|]|\n\s*•|\n\s*◦)/).map((b) => b.trim()).filter((b) => b.length > 10);
+    
+    for (const block of rawProjBlocks.slice(0, 3)) {
       const lines = block.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
       const rawHeader = lines[0].replace(/^[•◦*\-]\s*/, '');
 
-      // Skip section-heading-like lines
-      if (/^(projects?|personal projects?|side projects?)\s*:?\s*$/i.test(rawHeader)) continue;
+      if (/^(projects?|personal projects?|side projects?|programming achievements?)\s*:?\s*$/i.test(rawHeader)) continue;
       if (/^tech(\s+stack)?\s*[:\s]/i.test(rawHeader)) continue;
+      if (rawHeader.length < 5 || rawHeader.endsWith('.')) continue; // ignore broken fragment lines ending in period
 
-      // Project title = text before first —, –, |
       const titleMatch = rawHeader.match(/^([A-Za-z0-9_\s.:'-]+?)(?:\s*[—–|]|$)/);
       const title = (titleMatch ? titleMatch[1].trim() : rawHeader.split(/[—–|]/)[0].trim()).replace(/\s*\|.*$/, '');
 
-      if (!title || title.length < 2) continue;
+      if (!title || title.length < 3 || /^(latency|guarantee|engineered|implemented|secured)/i.test(title)) continue;
 
-      // Tech stack: explicit label (anywhere in block) OR parenthesised list
-      const techMatch = block.match(/Tech(?:\s+Stack)?[:\s]+([^\n]+)/i) ||
-                        block.match(/\(([^)]{3,80})\)/);
-      const tech_stack = techMatch
-        ? techMatch[1].split(/[,|]/).map((s) => s.trim()).filter(Boolean)
-        : [];
+      const techMatch = block.match(/Tech(?:\s+Stack)?[:\s]+([^\n]+)/i) || block.match(/\(([^)]{3,80})\)/);
+      const tech_stack = techMatch ? techMatch[1].split(/[,|]/).map((s) => s.trim()).filter(Boolean) : [];
 
-      // Description: bullet lines, skip tech-stack lines
       const descLines = lines
         .slice(1)
         .filter((l) => !/^tech(\s+stack)?\s*[:\s]/i.test(l))
         .map((l) => l.replace(/^[•◦*\-]\s*/, '').trim())
-        .filter(Boolean);
+        .filter((l) => l.length > 8);
 
       const repoUrl = githubData?.repositories?.find(
-        (r) => r.name.toLowerCase().replace(/-/g, ' ') === title.toLowerCase().replace(/-/g, ' ')
+        (r) => r.name.toLowerCase().replace(/[-_]/g, ' ') === title.toLowerCase().replace(/[-_]/g, ' ')
       )?.url || '';
 
-      projects.push({ title, description: descLines.join(' ').trim() || rawHeader, tech_stack, url: repoUrl });
+      projects.push({
+        title,
+        description: descLines.join(' ').trim() || rawHeader,
+        tech_stack,
+        url: repoUrl
+      });
     }
   }
 
-  // Add GitHub repos not already listed
-  if (githubData?.repositories && Array.isArray(githubData.repositories)) {
-    githubData.repositories.forEach((repo) => {
-      if (
-        repo.name &&
-        !projects.some((p) => p.title.toLowerCase() === repo.name.toLowerCase()) &&
-        repo.name.toLowerCase() !== name.toLowerCase()
-      ) {
+  // ONLY use GitHub repos if resume yielded ZERO projects
+  if (projects.length === 0 && githubData?.repositories && Array.isArray(githubData.repositories)) {
+    githubData.repositories.slice(0, 2).forEach((repo) => {
+      if (repo.name && !['portfolio', name.toLowerCase()].includes(repo.name.toLowerCase())) {
         projects.push({
           title: repo.name,
-          description: repo.description || 'Software Engineering Project',
+          description: repo.description || 'Full-Stack Software Engineering Project',
           tech_stack: repo.language ? [repo.language] : [],
           url: repo.url
         });
@@ -200,35 +202,36 @@ export const parseResumeTextIntelligently = (resumeText = '', githubData = null,
     });
   }
 
-  // 6. Skills — handles "Label: skill1, skill2" AND inline comma-separated (fix #4)
+  // 6. Skills
   let skills = [];
   if (skillText) {
-    // First pass: handle labeled categories like "Backend: Node.js, Express"
     const labeledSkills = [...skillText.matchAll(/[A-Za-z &]+:\s*([^\n]+)/g)]
       .flatMap(([, val]) => val.split(/[,|]/).map((s) => s.trim()))
       .filter((s) => s.length >= 2 && s.length <= 40);
 
-    // Second pass: bare comma/bullet lists
     const bareSkills = skillText
       .split(/[,•◦*|\n]/)
       .map((s) => s.replace(/^[^:]+:\s*/, '').trim())
       .filter((s) => s.length >= 2 && s.length <= 40 && !s.includes(':') && !/^\d+$/.test(s));
 
-    const combined = [...new Set([...labeledSkills, ...bareSkills])];
-    skills = combined.slice(0, 25);
+    skills = [...new Set([...labeledSkills, ...bareSkills])].slice(0, 25);
   }
   if (skills.length === 0 && githubData?.top_languages) {
     skills = githubData.top_languages;
   }
 
-  // 7. Achievements — cleaned bullet lines
+  // 7. Achievements
   const achievements = [];
   if (achText) {
-    const achLines = achText.split(/\r?\n/).map((l) => l.replace(/^[•◦*-]\s*/, '').trim()).filter((l) => l.length > 15);
-    achLines.slice(0, 4).forEach((l) => achievements.push(l));
+    achText
+      .split(/\r?\n/)
+      .map((l) => l.replace(/^[•◦*\-]\s*/, '').trim())
+      .filter((l) => l.length > 15 && !/^(programming achievements|certifications|extracurriculars)$/i.test(l))
+      .slice(0, 4)
+      .forEach((l) => achievements.push(l));
   }
 
-  // 8. Education — correctly assigns institution vs. degree (fix #1)
+  // 8. Education
   const education = [];
   if (eduText) {
     const eduLines = eduText
@@ -236,67 +239,53 @@ export const parseResumeTextIntelligently = (resumeText = '', githubData = null,
       .map((l) => l.replace(/^[•◦*\-]\s*/, '').trim())
       .filter(Boolean);
 
-    // Institution line: contains university/college/institute keywords
     const instIdx = eduLines.findIndex((l) =>
       /university|college|institute|school|\biit\b|\bnit\b|\biiit\b/i.test(l)
     );
-    // Degree line: B.Tech, B.S., B.A., Bachelor of, M.S., Master of, MBA, Ph.D etc.
     const degIdx = eduLines.findIndex((l) =>
       /\b(B\.?\s?Tech|B\.?\s?E\.?|B\.?\s?Sc|B\.?\s?S\.?|B\.?\s?A\.?|M\.?\s?Tech|M\.?\s?S\.?|M\.?\s?Sc|MBA|Bachelor|Master|Ph\.?D|B\.?\s?Com)\b/i.test(l)
     );
 
-    // institution comes from the keyword-matched line; degree from the degree-matched line
     const institution = instIdx >= 0 ? eduLines[instIdx] : (degIdx >= 0 ? '' : eduLines[0] || '');
     const degree      = degIdx >= 0 ? eduLines[degIdx]  : (instIdx >= 0 ? eduLines.find((l, i) => i !== instIdx) || '' : '');
 
     const allEduText = eduLines.join(' ');
     const year = extractDate(allEduText) || '';
     const gpaMatch = allEduText.match(/(?:GPA|CGPA|Grade)[\s:]+([\d.]+)/i);
-    const details = gpaMatch ? `${gpaMatch[0].split(':')[0]}: ${gpaMatch[1]}` : eduLines.filter((l, i) => i !== instIdx && i !== degIdx).join(' ');
+    const details = gpaMatch ? `CGPA: ${gpaMatch[1]}` : eduLines.filter((l, i) => i !== instIdx && i !== degIdx).join(' ');
 
     if (institution || degree) {
       education.push({ degree, institution, year, details });
     }
   }
 
-  // Generic Professional Headline
+  // Headline
   const headline = work_experience.length > 0
-    ? `${work_experience[0].title} | ${skills.slice(0, 3).join(', ')} Developer`
+    ? `${work_experience[0].title}${work_experience[0].company ? ' @ ' + work_experience[0].company : ''}`
     : (education[0] ? `${education[0].degree} Student | Software Developer` : 'Full-Stack Software Engineering Candidate');
 
   return {
     name,
     headline,
-    skills: skills.length > 0 ? skills.slice(0, 20) : ['JavaScript', 'TypeScript', 'React', 'Node.js'],
+    skills: skills.length > 0 ? skills : ['JavaScript', 'TypeScript', 'React', 'Node.js'],
     projects: projects.slice(0, 3),
     work_experience,
     education,
     achievements,
-    open_source: projects.map((p) => p.title),
+    open_source: projects.map((p) => p.title).filter(Boolean),
     career_focus: 'Software Engineering / Full Stack Development',
-    contact_info: {
-      email,
-      phone,
-      location: ''
-    }
+    contact_info: { email, phone, location: '' }
   };
 };
 
 /**
  * Uses Groq LLM (or dynamic parser fallback) to analyze, deduplicate, and synthesize
  * raw resume text, GitHub repositories data, and LinkedIn profile info into a unified candidate profile JSON.
- *
- * @param {object} params
- * @param {string} [params.resumeText]
- * @param {object} [params.githubData]
- * @param {object} [params.linkedinData]
- * @returns {Promise<object>} Synthesized candidate profile object
  */
 export const synthesizeUserProfile = async ({ resumeText = '', githubData = null, linkedinData = null }) => {
   const rawKey = process.env.GROQ_API_KEY || '';
   const apiKey = rawKey.trim().replace(/^["']|["']$/g, '');
 
-  // Run dynamic parser on the uploaded input
   const dynamicProfile = parseResumeTextIntelligently(resumeText, githubData, linkedinData);
 
   if (!apiKey || apiKey === 'your_groq_api_key' || apiKey.includes('your_')) {
@@ -307,11 +296,11 @@ export const synthesizeUserProfile = async ({ resumeText = '', githubData = null
   const inputsSummary = [];
 
   if (resumeText) {
-    inputsSummary.push(`=== UPLOADED RESUME TEXT ===\n${resumeText.slice(0, 8000)}`);
+    inputsSummary.push(`=== UPLOADED RESUME TEXT (PRIMARY SOURCE OF TRUTH) ===\n${resumeText.slice(0, 8000)}`);
   }
 
   if (githubData) {
-    inputsSummary.push(`=== GITHUB DATA ===\n${JSON.stringify(githubData, null, 2)}`);
+    inputsSummary.push(`=== GITHUB DATA (SECONDARY REFERENCE ONLY) ===\nUsername: ${githubData.username}\nProfile URL: ${githubData.profile_url}`);
   }
 
   if (linkedinData) {
@@ -322,25 +311,26 @@ export const synthesizeUserProfile = async ({ resumeText = '', githubData = null
     return dynamicProfile;
   }
 
-  const systemPrompt = `You are a universal resume parser and technical background analyst.
-Analyze the candidate's raw uploaded resume text, GitHub repositories, and LinkedIn data provided.
-Synthesize all inputs into a high-quality, comprehensive, deduplicated candidate profile JSON tailored strictly to the candidate's uploaded resume.
+  const systemPrompt = `You are an expert technical recruiter and resume parser.
+Analyze the candidate's raw uploaded resume text as the PRIMARY SOURCE OF TRUTH.
 
-CRITICAL INSTRUCTIONS:
-- Derive candidate name, title, education, skills, work experience, projects, and achievements EXCLUSIVELY from the provided text.
-- Do NOT invent or hardcode candidate details, names, or fake companies.
-- Clean candidate's name — do NOT append "Email:" or phone numbers into the name string.
-- Output raw JSON ONLY matching this format:
+CRITICAL DIRECTIVES:
+1. Extract Work Experience, Projects, Education, Achievements, and Skills STRICTLY from the UPLOADED RESUME TEXT.
+2. Do NOT list raw/random GitHub repositories as projects unless they are explicitly detailed in the resume.
+3. Do NOT fragment sentences or bullet points into separate fake projects or jobs (e.g. "latency." or "guarantee strict state...").
+4. Keep project titles clean (e.g. "LiveInterview", "Sangraj Rentals").
+5. Clean candidate's name — do NOT append "Email:" or phone numbers into the name.
+6. Output raw JSON ONLY with no markdown wrappers matching this structure:
 
 {
-  "name": "Candidate Full Name extracted from resume",
-  "headline": "Professional headline summarizing candidate's education/experience and core skills",
-  "skills": ["Language 1", "Framework 2", "Database 3", "Tool 4"],
+  "name": "Candidate Full Name",
+  "headline": "Professional headline summarizing education/experience and skills",
+  "skills": ["Skill 1", "Skill 2"],
   "projects": [
     {
       "title": "Project Name",
-      "description": "Key features, technical architecture, and impact",
-      "tech_stack": ["React", "Node.js"],
+      "description": "Clean 1-2 sentence description of architecture and metrics",
+      "tech_stack": ["React", "Spring Boot"],
       "url": "https://..."
     }
   ],
@@ -349,32 +339,31 @@ CRITICAL INSTRUCTIONS:
       "title": "Job Title",
       "company": "Company Name",
       "duration": "Dates/Duration",
-      "description": "Key contributions, technical achievements, metrics"
+      "description": "Key contributions and achievements"
     }
   ],
   "education": [
     {
       "degree": "Degree & Major",
       "institution": "University / Institution Name",
-      "year": "Graduation Year / Span",
-      "details": "CGPA/GPA or key coursework"
+      "year": "Dates",
+      "details": "CGPA/GPA"
     }
   ],
   "achievements": [
-    "Competitive programming ratings, awards, hackathons, certifications, metrics"
+    "Competitive programming awards, Flipkart Grid semi-finalist, certifications"
   ],
-  "open_source": [
-    "Key open source contributions or public GitHub repositories"
-  ],
-  "career_focus": "Target career focus derived from resume (e.g. Software Engineering / Full Stack Development)",
+  "open_source": ["Project Title 1", "Project Title 2"],
+  "career_focus": "Software Engineering / Full Stack Development",
   "contact_info": {
-    "email": "Email address extracted from resume",
-    "phone": "Phone number extracted from resume",
-    "location": "City/Country if found"
+    "email": "Email address",
+    "phone": "Phone number",
+    "location": ""
   }
-}`;
+}
+`;
 
-  const userPrompt = `Synthesize the provided candidate inputs into the required JSON format:
+  const userPrompt = `Synthesize the candidate's uploaded resume into the required JSON format:
 
 ${inputsSummary.join('\n\n')}
 

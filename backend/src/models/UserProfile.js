@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { fileDb } from '../utils/fileDb.js';
 
 const userProfileSchema = new mongoose.Schema(
   {
@@ -83,11 +84,18 @@ const userProfileSchema = new mongoose.Schema(
  */
 userProfileSchema.statics.getProfile = async function (userId) {
   if (!userId) throw new Error('userId is required for getProfile');
-  let profile = await this.findOne({ user_id: userId });
-  if (!profile) {
-    profile = await this.create({ user_id: userId });
+  try {
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+      return fileDb.getProfile();
+    }
+    let profile = await this.findOne({ user_id: userId });
+    if (!profile) {
+      profile = await this.create({ user_id: userId });
+    }
+    return profile;
+  } catch (err) {
+    return fileDb.getProfile();
   }
-  return profile;
 };
 
 const UserProfile = mongoose.model('UserProfile', userProfileSchema);

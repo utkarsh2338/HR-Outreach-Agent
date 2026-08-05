@@ -47,7 +47,7 @@ const DraftDrawer = ({
 
   const [subject, setSubject] = useState(draft?.subject ?? '');
   const [body, setBody] = useState(draft?.body ?? '');
-  const [activeTab, setActiveTab] = useState('edit');
+  const [activeTab, setActiveTab] = useState('preview');
 
   useEffect(() => {
     setSubject(draft?.subject ?? '');
@@ -106,11 +106,10 @@ const DraftDrawer = ({
     return html;
   };
 
-  const rawContent = hasChanges
-    ? body.replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>')
-    : (draft.html_body || body.replace(/\n/g, '<br>'));
-
-  const previewHtml = autoLinkText(rawContent);
+  // Use actual html_body for preview; fall back to plain text with links auto-linked only if edited
+  const previewSrcDoc = hasChanges
+    ? `<!DOCTYPE html><html><head><meta charset="UTF-8"></head><body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 14.5px; line-height: 1.7; color: #1f2937; padding: 16px;">${autoLinkText(body.replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>'))}</body></html>`
+    : (draft.html_body || `<!DOCTYPE html><html><head><meta charset="UTF-8"></head><body style="font-family: -apple-system, sans-serif; font-size: 14.5px; line-height: 1.7; color: #1f2937; padding: 16px;">${autoLinkText(body.replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>'))}</body></html>`);
 
   return (
     <>
@@ -223,12 +222,13 @@ const DraftDrawer = ({
                 className="w-full flex-1 p-3.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 leading-relaxed font-sans text-gray-800 resize-none"
               />
             ) : (
-              <div className="w-full flex-1 p-4 border border-gray-200 rounded-md bg-gray-50/50 overflow-y-auto">
+              <div className="w-full flex-1 border border-gray-200 rounded-md overflow-hidden bg-white">
                 <iframe
-                  title="Email preview"
-                  srcDoc={`<!DOCTYPE html><html><body style="font-family: Georgia, serif; font-size: 15px; line-height: 1.7; color: #2c2c2c; padding: 12px;">${previewHtml}</body></html>`}
-                  sandbox="allow-same-origin allow-scripts"
-                  className="w-full h-full min-h-[300px] border-0"
+                  title="Email HTML preview"
+                  srcDoc={previewSrcDoc}
+                  sandbox="allow-same-origin"
+                  className="w-full border-0"
+                  style={{ height: '520px' }}
                 />
               </div>
             )}

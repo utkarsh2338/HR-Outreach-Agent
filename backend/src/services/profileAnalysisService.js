@@ -6,7 +6,7 @@ import { LLM_MODEL } from '../config/llm.js';
  */
 const normalizeResumeText = (rawText = '') => {
   if (!rawText) return '';
-  
+
   let text = rawText;
 
   // Fix squished date patterns (e.g. "47BillionMay 2026" -> "47Billion May 2026")
@@ -94,11 +94,11 @@ export const parseResumeTextIntelligently = (resumeText = '', githubData = null,
     return raw.replace(/^[^\n]*\n/, '').trim();
   };
 
-  const expText   = getSectionText(['experience', 'employment']);
-  const projText  = getSectionText(['projects', 'personal project', 'side project']);
+  const expText = getSectionText(['experience', 'employment']);
+  const projText = getSectionText(['projects', 'personal project', 'side project']);
   const skillText = getSectionText(['skills', 'technical']);
-  const eduText   = getSectionText(['education']);
-  const achText   = getSectionText(['achievements', 'certifications', 'honors', 'awards']);
+  const eduText = getSectionText(['education']);
+  const achText = getSectionText(['achievements', 'certifications', 'honors', 'awards']);
 
   // 4. Work Experience — strictly parse resume text
   const work_experience = [];
@@ -119,7 +119,7 @@ export const parseResumeTextIntelligently = (resumeText = '', githubData = null,
       const sepMatch = header.match(/^(.+?)(?:\s*[|@]\s*|\s+at\s+|\s*[–-]\s*)(.+?)(?:\s*[|@].*)?$/i);
       let title = '', company = '';
       if (sepMatch) {
-        title   = sepMatch[1].trim();
+        title = sepMatch[1].trim();
         company = sepMatch[2].trim().replace(/\s*(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec).*$/i, '').trim();
       } else {
         title = header.split(/–|-|\d{4}/)[0].trim();
@@ -152,7 +152,7 @@ export const parseResumeTextIntelligently = (resumeText = '', githubData = null,
   const projects = [];
   if (projText) {
     const rawProjBlocks = projText.split(/\n(?=[•◦*-]?\s*[A-Z0-9][a-zA-Z0-9\s.:'-]+[—–|]|\n\s*•|\n\s*◦)/).map((b) => b.trim()).filter((b) => b.length > 10);
-    
+
     for (const block of rawProjBlocks.slice(0, 3)) {
       const lines = block.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
       const rawHeader = lines[0].replace(/^[•◦*\-]\s*/, '');
@@ -247,7 +247,7 @@ export const parseResumeTextIntelligently = (resumeText = '', githubData = null,
     );
 
     const institution = instIdx >= 0 ? eduLines[instIdx] : (degIdx >= 0 ? '' : eduLines[0] || '');
-    const degree      = degIdx >= 0 ? eduLines[degIdx]  : (instIdx >= 0 ? eduLines.find((l, i) => i !== instIdx) || '' : '');
+    const degree = degIdx >= 0 ? eduLines[degIdx] : (instIdx >= 0 ? eduLines.find((l, i) => i !== instIdx) || '' : '');
 
     const allEduText = eduLines.join(' ');
     const year = extractDate(allEduText) || '';

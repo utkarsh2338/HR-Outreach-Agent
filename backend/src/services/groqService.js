@@ -121,8 +121,7 @@ const safeParseJSON = (rawText) => {
 export const generatePersonalizedOpener = async ({ name, company, role_title, notes }) => {
   const apiKey = process.env.GROQ_API_KEY;
 
-  if (!apiKey) {
-    console.warn('[groqService] GROQ_API_KEY not set — using fallback opener');
+  if (!apiKey || apiKey === 'your_groq_api_key' || apiKey.includes('your_')) {
     return { opener: getFallbackOpener(company), llm_generated: false };
   }
 
@@ -131,7 +130,7 @@ export const generatePersonalizedOpener = async ({ name, company, role_title, no
   const systemPrompt = `You write cold email openers for a software developer reaching out to HR professionals and recruiters.
 
 Rules you MUST follow:
-- Write exactly 1-2 sentences, plain text only, under 40 words total
+- Write exactly 1-2 sentences, plain text only, under 40 words total about user and his or her projects
 - ONLY reference a specific company/role detail if it is explicitly present in the "Additional context" below — never invent facts, products, initiatives, funding, or team details you weren't given
 - If no specific context is provided, write a warm, role-focused opener without fake specificity — genuine and plain beats invented detail
 - Do NOT use: "I hope this email finds you well", "I was thrilled", "I was excited", "I came across your profile", "I stumbled upon"
@@ -167,12 +166,14 @@ Return only the opener text, nothing else.`;
     const raw = completion.choices?.[0]?.message?.content?.trim() ?? '';
 
     if (isWeakResponse(raw)) {
-      console.warn(`[groqService] LLM response failed quality check for "${company}", using fallback. Response: "${raw}"`);
       return { opener: getFallbackOpener(company), llm_generated: false };
     }
 
     return { opener: raw, llm_generated: true };
   } catch (error) {
+    if (error.status === 401 || error.message?.includes('401') || error.message?.includes('invalid_api_key')) {
+      return { opener: getFallbackOpener(company), llm_generated: false };
+    }
     console.error(`[groqService] Groq API call failed: ${error.message}`);
     return { opener: getFallbackOpener(company), llm_generated: false };
   }

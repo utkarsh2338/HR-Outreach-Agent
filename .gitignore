@@ -7,6 +7,7 @@ data/
 backend/data/
 backend/data/*
 !backend/data/.gitkeep
+backend/src/test-data/
 *.json
 !package.json
 !package-lock.json

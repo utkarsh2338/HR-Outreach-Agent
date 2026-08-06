@@ -99,9 +99,9 @@ export const buildColdEmail = ({ name, company, role_title, opener, candidate })
   // Fallback
   if (bulletItems.length === 0) {
     bulletItems = [
-      { text: 'Full-stack developer with production experience in React, Node.js, Express, and modern database architectures.' },
+      { text: 'Full-stack developer  with production experience in React, Node.js, Express, and modern database architectures.' },
       { text: 'Engineered RESTful APIs, real-time WebSocket systems, OAuth authentication, and high-performance UI components.' },
-      { text: 'Strong foundation in JavaScript / TypeScript, data structures, and software engineering best practices.' }
+      { text: 'Strong foundation in, Java,  JavaScript / TypeScript, data structures, and software engineering best practices.' }
     ];
   }
 
@@ -272,16 +272,6 @@ ${linksText}`;
 
             </td>
           </tr>
-
-          <!-- Footer bar -->
-          <tr>
-            <td style="background-color: #f9fafb; padding: 12px 36px; border-top: 1px solid #e5e7eb;">
-              <p style="margin: 0; font-size: 11.5px; color: #9ca3af; text-align: center;">
-                This email was sent by ${candidateName} as a personal outreach message.
-              </p>
-            </td>
-          </tr>
-
         </table>
       </td>
     </tr>

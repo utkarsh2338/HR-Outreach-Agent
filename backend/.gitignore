@@ -5,6 +5,7 @@ node_modules
 data/
 data/*
 !data/.gitkeep
+src/test-data/
 sent_contacts.csv
 
 # Environment variables
